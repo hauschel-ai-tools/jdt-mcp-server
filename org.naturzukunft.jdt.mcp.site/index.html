@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEO Meta Tags -->
+    <title>Eclipse JDT MCP Server - P2 Update Site</title>
+    <meta name="description" content="Eclipse Plugin für MCP (Model Context Protocol) Server Integration. Ermöglicht KI-Coding-Assistenten wie Claude Code und Cursor Zugriff auf Eclipse JDT Funktionen.">
+    <meta name="keywords" content="Eclipse, JDT, MCP, Model Context Protocol, Claude Code, Cursor, AI, Java Development Tools, Plugin, IDE Integration">
+    <meta name="author" content="naturzukunft">
+    <meta name="robots" content="index, follow">
+
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Eclipse JDT MCP Server">
+    <meta property="og:description" content="Eclipse Plugin für MCP Server Integration - KI-Assistenten für Java-Entwicklung">
+    <meta property="og:url" content="https://naturzukunft.codeberg.page/jdt-mcp-server/">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://naturzukunft.codeberg.page/jdt-mcp-server/">
+
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --accent: #27ae60;
+            --bg: #f8f9fa;
+            --text: #333;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--bg);
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+            border-bottom: 3px solid var(--secondary);
+            padding-bottom: 0.5rem;
+        }
+
+        h2 {
+            color: var(--primary);
+            margin: 2rem 0 1rem;
+            padding-bottom: 0.3rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 1.5rem 0 0.5rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        .update-site-url {
+            background: #e8f4f8;
+            border: 2px solid var(--secondary);
+            border-radius: 4px;
+            padding: 1rem;
+            margin: 1rem 0;
+            font-family: monospace;
+            font-size: 1.1rem;
+            word-break: break-all;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .update-site-url code {
+            background: none;
+            padding: 0;
+        }
+
+        .btn {
+            background: var(--secondary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 0.9rem;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+        }
+
+        .btn-success {
+            background: var(--accent);
+        }
+
+        .btn-success:hover {
+            background: #219a52;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+
+        .tools-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 0.5rem;
+            list-style: none;
+            margin: 1rem 0;
+        }
+
+        .tools-list li {
+            background: #f4f4f4;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            border-left: 3px solid var(--secondary);
+        }
+
+        .install-steps {
+            counter-reset: step;
+            list-style: none;
+            margin: 1rem 0;
+        }
+
+        .install-steps li {
+            counter-increment: step;
+            padding: 0.75rem 0 0.75rem 3rem;
+            position: relative;
+            border-left: 2px solid #eee;
+            margin-left: 1rem;
+        }
+
+        .install-steps li::before {
+            content: counter(step);
+            position: absolute;
+            left: -1rem;
+            top: 0.5rem;
+            background: var(--secondary);
+            color: white;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .card {
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            background: #fafafa;
+        }
+
+        .card h4 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .link-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .link-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .link-card a {
+            color: var(--secondary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .link-card p {
+            font-size: 0.85rem;
+            color: #666;
+            margin: 0.5rem 0 0;
+        }
+
+        .config-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: -1px;
+        }
+
+        .config-tab {
+            padding: 0.5rem 1rem;
+            background: #eee;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+        }
+
+        .config-tab.active {
+            background: #2c3e50;
+            color: white;
+        }
+
+        footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--secondary);
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 1rem;
+            }
+            .container {
+                padding: 1rem;
+            }
+            .update-site-url {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Eclipse JDT MCP Server</h1>
+
+        <p>
+            Ein Eclipse-Plugin, das einen <strong>MCP (Model Context Protocol) Server</strong> einbettet,
+            um Eclipse JDT-Funktionen für KI-Coding-Assistenten bereitzustellen.
+        </p>
+
+        <h2>P2 Update Site</h2>
+
+        <div class="update-site-url">
+            <code id="siteUrl">https://naturzukunft.codeberg.page/jdt-mcp-server/</code>
+            <button class="btn" onclick="copyUrl()">URL kopieren</button>
+        </div>
+
+        <h2>Installation in Eclipse</h2>
+
+        <ol class="install-steps">
+            <li>
+                <strong>Eclipse öffnen</strong><br>
+                Eclipse IDE for Java Developers (2024-03 oder neuer) starten
+            </li>
+            <li>
+                <strong>Install New Software öffnen</strong><br>
+                Menü: <code>Help → Install New Software...</code>
+            </li>
+            <li>
+                <strong>Update Site hinzufügen</strong><br>
+                Auf <code>Add...</code> klicken und die URL eingeben:<br>
+                <code>https://naturzukunft.codeberg.page/jdt-mcp-server/</code>
+            </li>
+            <li>
+                <strong>Plugin auswählen</strong><br>
+                "Eclipse JDT MCP Server" anhaken und <code>Next</code> klicken
+            </li>
+            <li>
+                <strong>Installation abschließen</strong><br>
+                Lizenz akzeptieren, installieren und Eclipse neu starten
+            </li>
+            <li>
+                <strong>MCP Server aktivieren</strong><br>
+                <code>Window → Preferences → JDT MCP Server</code><br>
+                "Enable MCP Server" aktivieren
+            </li>
+        </ol>
+
+        <h2>KI-Assistent konfigurieren</h2>
+
+        <div class="card">
+            <h4>Claude Code</h4>
+            <p>In <code>~/.claude.json</code> oder Projekt-<code>.claude.json</code>:</p>
+            <pre><code>{
+  "mcpServers": {
+    "eclipse-jdt": {
+      "url": "http://localhost:51000/sse",
+      "transport": "sse"
+    }
+  }
+}</code></pre>
+        </div>
+
+        <div class="card">
+            <h4>Cursor</h4>
+            <p>In <code>.cursor/mcp.json</code>:</p>
+            <pre><code>{
+  "mcpServers": {
+    "eclipse-jdt": {
+      "url": "http://localhost:51000/sse",
+      "transport": "sse"
+    }
+  }
+}</code></pre>
+        </div>
+
+        <p><strong>Hinweis:</strong> Der tatsächliche Port wird in der Eclipse-Konsole angezeigt (Standard: 51000-51100).</p>
+
+        <h2>Verfügbare MCP Tools</h2>
+        <ul class="tools-list">
+            <li>jdt_list_projects</li>
+            <li>jdt_get_classpath</li>
+            <li>jdt_get_compilation_errors</li>
+            <li>jdt_get_project_structure</li>
+            <li>jdt_parse_java_file</li>
+            <li>jdt_get_type_hierarchy</li>
+            <li>jdt_find_references</li>
+            <li>jdt_find_type</li>
+            <li>jdt_get_method_signature</li>
+            <li>jdt_rename_element</li>
+            <li>jdt_extract_method</li>
+        </ul>
+
+        <h2>Links</h2>
+
+        <div class="links-grid">
+            <div class="link-card">
+                <a href="https://codeberg.org/naturzukunft/jdt-mcp-server">Quellcode</a>
+                <p>Repository auf Codeberg</p>
+            </div>
+            <div class="link-card">
+                <a href="https://codeberg.org/naturzukunft/jdt-mcp-server/src/branch/main/org.naturzukunft.jdt.mcp/README.md">Dokumentation</a>
+                <p>Ausführliche Anleitung</p>
+            </div>
+            <div class="link-card">
+                <a href="https://codeberg.org/naturzukunft/jdt-mcp-server/issues">Issues</a>
+                <p>Bugs & Feature Requests</p>
+            </div>
+            <div class="link-card">
+                <a href="https://modelcontextprotocol.io">MCP Spezifikation</a>
+                <p>Model Context Protocol</p>
+            </div>
+            <div class="link-card">
+                <a href="https://www.eclipse.org/downloads/">Eclipse Download</a>
+                <p>Eclipse IDE herunterladen</p>
+            </div>
+            <div class="link-card">
+                <a href="https://claude.ai/claude-code">Claude Code</a>
+                <p>AI Coding Assistant</p>
+            </div>
+        </div>
+
+        <footer>
+            <p>Inspiriert von <a href="https://spring.io/blog/2025/12/04/towards-spring-tools-5-part3/">Spring Tools 5 MCP Server</a> von Martin Lippert</p>
+            <p>
+                <a href="https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12">EUPL-1.2 Lizenz</a> ·
+                © 2025 naturzukunft
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        function copyUrl() {
+            const url = document.getElementById('siteUrl').textContent.trim();
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = document.querySelector('.btn');
+                const original = btn.textContent;
+                btn.textContent = 'Kopiert!';
+                btn.classList.add('btn-success');
+                setTimeout(() => {
+                    btn.textContent = original;
+                    btn.classList.remove('btn-success');
+                }, 2000);
+            });
+        }
+    </script>
+
+    <!-- Structured Data for SEO -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Eclipse JDT MCP Server",
+        "description": "Eclipse Plugin für MCP Server Integration - ermöglicht KI-Coding-Assistenten Zugriff auf Java Development Tools",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "EUR"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "naturzukunft"
+        },
+        "license": "https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12",
+        "downloadUrl": "https://naturzukunft.codeberg.page/jdt-mcp-server/",
+        "softwareRequirements": "Eclipse IDE 2024-03+, Java 17+"
+    }
+    </script>
+</body>
+</html>

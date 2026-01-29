@@ -1,0 +1,34 @@
+variables:
+  - &maven_image 'maven:3.9-eclipse-temurin-17'
+
+when:
+  branch: main
+
+steps:
+  # Dependencies für das Plugin herunterladen
+  download-dependencies:
+    image: *maven_image
+    commands:
+      - mvn dependency:copy-dependencies -DoutputDirectory=org.naturzukunft.jdt.mcp/lib -f org.naturzukunft.jdt.mcp/pom.xml
+
+  # Vollständiger Build inkl. P2 Repository
+  build:
+    image: *maven_image
+    commands:
+      - mvn clean verify
+    depends_on:
+      - download-dependencies
+
+  # Auf Codeberg Pages deployen
+  deploy-pages:
+    image: woodpeckerci/plugin-gitea-pages
+    settings:
+      gitea_token:
+        from_secret: cb_token
+      pages_directory: org.naturzukunft.jdt.mcp.site/target/repository
+      gitea_server: https://codeberg.org
+    when:
+      - event: push
+        branch: main
+    depends_on:
+      - build

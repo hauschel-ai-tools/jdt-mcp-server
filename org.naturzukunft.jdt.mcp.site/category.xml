@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+   <feature id="org.naturzukunft.jdt.mcp.feature" version="0.0.0">
+      <category name="jdt-mcp"/>
+   </feature>
+
+   <category-def name="jdt-mcp" label="Eclipse JDT MCP Server">
+      <description>
+         MCP Server integration for Eclipse JDT, enabling AI coding assistants
+         to access Java Development Tools features.
+      </description>
+   </category-def>
+</site>
