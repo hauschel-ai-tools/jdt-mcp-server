@@ -14,18 +14,15 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.search.IJavaSearchConstants;
 import org.eclipse.jdt.core.search.IJavaSearchScope;
 import org.eclipse.jdt.core.search.SearchEngine;
-import org.eclipse.jdt.core.search.SearchMatch;
-import org.eclipse.jdt.core.search.SearchParticipant;
 import org.eclipse.jdt.core.search.SearchPattern;
-import org.eclipse.jdt.core.search.SearchRequestor;
 import org.eclipse.jdt.core.search.TypeNameMatch;
 import org.eclipse.jdt.core.search.TypeNameMatchRequestor;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 /**
@@ -39,16 +36,19 @@ public class NavigationTools {
      * Tool: Search for types in workspace.
      */
     public static ToolRegistration findTypeTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("pattern", Map.of(
+                        "type", "string",
+                        "description", "Type name pattern (e.g., 'ArrayList', '*Service', 'User*')")),
+                List.of("pattern"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_find_type",
                 "Search for Java types (classes, interfaces, enums) by name pattern. Supports wildcards (* and ?)",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "pattern", Map.of(
-                                        "type", "string",
-                                        "description", "Type name pattern (e.g., 'ArrayList', '*Service', 'User*')")),
-                        "required", List.of("pattern")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> findType((String) args.get("pattern")));
     }
@@ -104,10 +104,10 @@ public class NavigationTools {
             result.put("matchCount", matches.size());
             result.put("matches", matches);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error finding types: " + e.getMessage());
+            return new CallToolResult("Error finding types: " + e.getMessage(), true);
         }
     }
 
@@ -115,19 +115,23 @@ public class NavigationTools {
      * Tool: Get detailed method signature information.
      */
     public static ToolRegistration getMethodSignatureTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "className", Map.of(
+                                "type", "string",
+                                "description", "Fully qualified class name"),
+                        "methodName", Map.of(
+                                "type", "string",
+                                "description", "Method name (use * to get all methods)")),
+                List.of("className", "methodName"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_get_method_signature",
                 "Get method signature with parameters, return type, and modifiers",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "className", Map.of(
-                                        "type", "string",
-                                        "description", "Fully qualified class name"),
-                                "methodName", Map.of(
-                                        "type", "string",
-                                        "description", "Method name (use * to get all methods)")),
-                        "required", List.of("className", "methodName")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> getMethodSignature(
                 (String) args.get("className"),
@@ -136,9 +140,9 @@ public class NavigationTools {
 
     private static CallToolResult getMethodSignature(String className, String methodName) {
         try {
-            IType type = findType(className);
+            IType type = findTypeByName(className);
             if (type == null) {
-                return errorResult("Type not found: " + className);
+                return new CallToolResult("Type not found: " + className, true);
             }
 
             List<Map<String, Object>> methods = new ArrayList<>();
@@ -185,17 +189,17 @@ public class NavigationTools {
             result.put("methodCount", methods.size());
             result.put("methods", methods);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error getting method signature: " + e.getMessage());
+            return new CallToolResult("Error getting method signature: " + e.getMessage(), true);
         }
     }
 
     /**
      * Helper: Find a type by fully qualified name.
      */
-    private static IType findType(String fullyQualifiedName) {
+    private static IType findTypeByName(String fullyQualifiedName) {
         try {
             for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
                     .getJavaProjects()) {
@@ -208,17 +212,5 @@ public class NavigationTools {
             System.err.println("[JDT MCP] Error finding type: " + e.getMessage());
         }
         return null;
-    }
-
-    private static CallToolResult successResult(String content) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(content)),
-                false);
-    }
-
-    private static CallToolResult errorResult(String message) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(message)),
-                true);
     }
 }

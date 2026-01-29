@@ -10,6 +10,7 @@ import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.jdt.core.IClasspathEntry;
+import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
@@ -18,8 +19,8 @@ import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 /**
@@ -33,12 +34,17 @@ public class ProjectInfoTools {
      * Tool: List all Java projects in workspace.
      */
     public static ToolRegistration listProjectsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(),
+                List.of(),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_list_projects",
                 "List all Java projects in the Eclipse workspace",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of()));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> listProjects());
     }
@@ -67,10 +73,10 @@ public class ProjectInfoTools {
             result.put("projectCount", projects.size());
             result.put("projects", projects);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error listing projects: " + e.getMessage());
+            return new CallToolResult("Error listing projects: " + e.getMessage(), true);
         }
     }
 
@@ -78,16 +84,19 @@ public class ProjectInfoTools {
      * Tool: Get project classpath entries.
      */
     public static ToolRegistration getClasspathTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Name of the Java project")),
+                List.of("projectName"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_get_classpath",
                 "Get resolved classpath for a Java project (source folders, libraries, output folders)",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "projectName", Map.of(
-                                        "type", "string",
-                                        "description", "Name of the Java project")),
-                        "required", List.of("projectName")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> getClasspath((String) args.get("projectName")));
     }
@@ -96,7 +105,7 @@ public class ProjectInfoTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return errorResult("Java project not found: " + projectName);
+                return new CallToolResult("Java project not found: " + projectName, true);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -136,10 +145,10 @@ public class ProjectInfoTools {
             result.put("projectDependencies", projects);
             result.put("outputLocation", javaProject.getOutputLocation().toString());
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error getting classpath: " + e.getMessage());
+            return new CallToolResult("Error getting classpath: " + e.getMessage(), true);
         }
     }
 
@@ -147,16 +156,19 @@ public class ProjectInfoTools {
      * Tool: Get compilation errors and warnings.
      */
     public static ToolRegistration getCompilationErrorsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Name of the Java project")),
+                List.of("projectName"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_get_compilation_errors",
                 "Get all compilation errors and warnings for a Java project",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "projectName", Map.of(
-                                        "type", "string",
-                                        "description", "Name of the Java project")),
-                        "required", List.of("projectName")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> getCompilationErrors((String) args.get("projectName")));
     }
@@ -165,7 +177,7 @@ public class ProjectInfoTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return errorResult("Project not found: " + projectName);
+                return new CallToolResult("Project not found: " + projectName, true);
             }
 
             IMarker[] markers = project.findMarkers(
@@ -201,10 +213,10 @@ public class ProjectInfoTools {
             result.put("errors", errors);
             result.put("warnings", warnings);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error getting compilation errors: " + e.getMessage());
+            return new CallToolResult("Error getting compilation errors: " + e.getMessage(), true);
         }
     }
 
@@ -212,16 +224,19 @@ public class ProjectInfoTools {
      * Tool: Get project structure overview.
      */
     public static ToolRegistration getProjectStructureTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Name of the Java project")),
+                List.of("projectName"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_get_project_structure",
                 "Get overview of project structure (Java version, source folders, packages)",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "projectName", Map.of(
-                                        "type", "string",
-                                        "description", "Name of the Java project")),
-                        "required", List.of("projectName")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> getProjectStructure((String) args.get("projectName")));
     }
@@ -230,7 +245,7 @@ public class ProjectInfoTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return errorResult("Java project not found: " + projectName);
+                return new CallToolResult("Java project not found: " + projectName, true);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -263,10 +278,10 @@ public class ProjectInfoTools {
             }
             result.put("sourceFolders", sourceFolders);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error getting project structure: " + e.getMessage());
+            return new CallToolResult("Error getting project structure: " + e.getMessage(), true);
         }
     }
 
@@ -284,17 +299,5 @@ public class ProjectInfoTools {
             System.err.println("[JDT MCP] Error getting Java project: " + e.getMessage());
         }
         return null;
-    }
-
-    private static CallToolResult successResult(String content) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(content)),
-                false);
-    }
-
-    private static CallToolResult errorResult(String message) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(message)),
-                true);
     }
 }

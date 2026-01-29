@@ -12,7 +12,8 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.jface,
  org.eclipse.text,
  org.eclipse.ltk.core.refactoring,
- org.eclipse.jdt.ui
+ org.eclipse.jdt.ui,
+ org.eclipse.jdt.core.manipulation
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Automatic-Module-Name: org.naturzukunft.jdt.mcp
 Bundle-ActivationPolicy: lazy
@@ -21,7 +22,15 @@ Bundle-ClassPath: .,
  lib/jackson-databind-2.16.0.jar,
  lib/jackson-core-2.16.0.jar,
  lib/jackson-annotations-2.16.0.jar,
- lib/slf4j-api-2.0.9.jar
+ lib/slf4j-api-2.0.9.jar,
+ lib/jetty-server-12.0.15.jar,
+ lib/jetty-http-12.0.15.jar,
+ lib/jetty-util-12.0.15.jar,
+ lib/jetty-io-12.0.15.jar,
+ lib/jetty-ee10-servlet-12.0.15.jar,
+ lib/jetty-security-12.0.15.jar,
+ lib/jetty-session-12.0.15.jar,
+ lib/jakarta.servlet-api-6.0.0.jar
 Export-Package: org.naturzukunft.jdt.mcp,
  org.naturzukunft.jdt.mcp.tools,
  org.naturzukunft.jdt.mcp.preferences

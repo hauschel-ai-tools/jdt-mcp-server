@@ -2,21 +2,17 @@ package org.naturzukunft.jdt.mcp;
 
 import java.io.IOException;
 import java.net.ServerSocket;
-import java.util.List;
 import java.util.Map;
 
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.naturzukunft.jdt.mcp.preferences.McpPreferenceConstants;
+import org.naturzukunft.jdt.mcp.server.McpHttpServer;
+import org.naturzukunft.jdt.mcp.server.McpProtocolHandler;
 import org.naturzukunft.jdt.mcp.tools.CodeAnalysisTools;
 import org.naturzukunft.jdt.mcp.tools.NavigationTools;
 import org.naturzukunft.jdt.mcp.tools.ProjectInfoTools;
 import org.naturzukunft.jdt.mcp.tools.RefactoringTools;
 
-import io.modelcontextprotocol.server.McpServer;
-import io.modelcontextprotocol.server.McpServerFeatures;
-import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletSseServerTransportProvider;
-import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
@@ -25,10 +21,13 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
  */
 public class McpServerManager {
 
-    private McpSyncServer mcpServer;
-    private HttpServletSseServerTransportProvider transportProvider;
     private int port;
     private boolean running = false;
+    private McpHttpServer httpServer;
+    private McpProtocolHandler protocolHandler;
+
+    // Tool registrations
+    private ToolRegistration[] tools;
 
     /**
      * Starts the MCP server on an available port.
@@ -48,61 +47,50 @@ public class McpServerManager {
             // Find available port
             port = findAvailablePort(portStart, portEnd);
 
-            // Create transport provider
-            transportProvider = HttpServletSseServerTransportProvider.builder()
-                    .port(port)
-                    .build();
+            // Create protocol handler
+            protocolHandler = new McpProtocolHandler();
 
-            // Build MCP server with tools
-            McpServer.SyncSpec serverSpec = McpServer.sync(transportProvider)
-                    .serverInfo(new McpSchema.Implementation(
-                            "eclipse-jdt-mcp-server",
-                            "1.0.0"))
-                    .capabilities(McpSchema.ServerCapabilities.builder()
-                            .tools(new McpSchema.ServerCapabilities.ToolCapabilities(true))
-                            .build());
+            // Register all tools
+            tools = new ToolRegistration[] {
+                // Code Analysis Tools
+                CodeAnalysisTools.parseJavaFileTool(),
+                CodeAnalysisTools.getTypeHierarchyTool(),
+                CodeAnalysisTools.findReferencesTool(),
 
-            // Register Code Analysis Tools
-            registerTool(serverSpec, CodeAnalysisTools.parseJavaFileTool());
-            registerTool(serverSpec, CodeAnalysisTools.getTypeHierarchyTool());
-            registerTool(serverSpec, CodeAnalysisTools.findReferencesTool());
+                // Navigation Tools
+                NavigationTools.findTypeTool(),
+                NavigationTools.getMethodSignatureTool(),
 
-            // Register Navigation Tools
-            registerTool(serverSpec, NavigationTools.findTypeTool());
-            registerTool(serverSpec, NavigationTools.getMethodSignatureTool());
+                // Project Info Tools
+                ProjectInfoTools.listProjectsTool(),
+                ProjectInfoTools.getClasspathTool(),
+                ProjectInfoTools.getCompilationErrorsTool(),
+                ProjectInfoTools.getProjectStructureTool(),
 
-            // Register Project Info Tools
-            registerTool(serverSpec, ProjectInfoTools.getClasspathTool());
-            registerTool(serverSpec, ProjectInfoTools.getCompilationErrorsTool());
-            registerTool(serverSpec, ProjectInfoTools.getProjectStructureTool());
-            registerTool(serverSpec, ProjectInfoTools.listProjectsTool());
+                // Refactoring Tools
+                RefactoringTools.renameElementTool(),
+                RefactoringTools.extractMethodTool()
+            };
 
-            // Register Refactoring Tools
-            registerTool(serverSpec, RefactoringTools.renameElementTool());
-            registerTool(serverSpec, RefactoringTools.extractMethodTool());
+            // Register tools with protocol handler
+            protocolHandler.registerTools(tools);
 
-            // Build and start
-            mcpServer = serverSpec.build();
-            transportProvider.start();
+            // Create and start HTTP server
+            httpServer = new McpHttpServer(port, protocolHandler);
+            httpServer.start();
 
             running = true;
-            System.out.println("[JDT MCP] Server started on port " + port);
-            System.out.println("[JDT MCP] Endpoint: http://localhost:" + port + "/sse");
+            System.out.println("[JDT MCP] Server started successfully");
+            System.out.println("[JDT MCP] Registered " + tools.length + " tools:");
+            for (ToolRegistration tool : tools) {
+                System.out.println("[JDT MCP]   - " + tool.tool().name());
+            }
 
         } catch (Exception e) {
             System.err.println("[JDT MCP] Failed to start server: " + e.getMessage());
             e.printStackTrace();
             running = false;
         }
-    }
-
-    /**
-     * Registers a tool with the MCP server.
-     */
-    private void registerTool(McpServer.SyncSpec serverSpec, ToolRegistration registration) {
-        serverSpec.tool(
-                registration.tool(),
-                (exchange, args) -> registration.handler().handle(args));
     }
 
     /**
@@ -114,11 +102,8 @@ public class McpServerManager {
         }
 
         try {
-            if (transportProvider != null) {
-                transportProvider.close();
-            }
-            if (mcpServer != null) {
-                mcpServer.close();
+            if (httpServer != null) {
+                httpServer.stop();
             }
             running = false;
             System.out.println("[JDT MCP] Server stopped");
@@ -139,6 +124,20 @@ public class McpServerManager {
      */
     public int getPort() {
         return port;
+    }
+
+    /**
+     * Get registered tools (for testing/debugging).
+     */
+    public ToolRegistration[] getTools() {
+        return tools;
+    }
+
+    /**
+     * Get the SSE endpoint URL.
+     */
+    public String getSseEndpoint() {
+        return "http://localhost:" + port + "/sse";
     }
 
     /**

@@ -33,6 +33,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 /**
@@ -46,16 +47,19 @@ public class CodeAnalysisTools {
      * Tool: Parse Java file and return AST structure.
      */
     public static ToolRegistration parseJavaFileTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("filePath", Map.of(
+                        "type", "string",
+                        "description", "Absolute file path to Java source file")),
+                List.of("filePath"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_parse_java_file",
                 "Parse Java source file and return structure (package, imports, types, methods, fields)",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "filePath", Map.of(
-                                        "type", "string",
-                                        "description", "Absolute file path to Java source file")),
-                        "required", List.of("filePath")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> parseJavaFile((String) args.get("filePath")));
     }
@@ -66,12 +70,12 @@ public class CodeAnalysisTools {
             IFile file = root.getFileForLocation(new Path(filePath));
 
             if (file == null || !file.exists()) {
-                return errorResult("File not found: " + filePath);
+                return new CallToolResult("File not found: " + filePath, true);
             }
 
             IJavaElement javaElement = JavaCore.create(file);
             if (!(javaElement instanceof ICompilationUnit cu)) {
-                return errorResult("Not a Java source file: " + filePath);
+                return new CallToolResult("Not a Java source file: " + filePath, true);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -97,10 +101,10 @@ public class CodeAnalysisTools {
             }
             result.put("types", types);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error parsing file: " + e.getMessage());
+            return new CallToolResult("Error parsing file: " + e.getMessage(), true);
         }
     }
 
@@ -150,16 +154,19 @@ public class CodeAnalysisTools {
      * Tool: Get type hierarchy for a class.
      */
     public static ToolRegistration getTypeHierarchyTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("className", Map.of(
+                        "type", "string",
+                        "description", "Fully qualified class name (e.g., java.util.ArrayList)")),
+                List.of("className"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_get_type_hierarchy",
                 "Get complete type hierarchy (superclasses, interfaces, subclasses) for a Java type",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "className", Map.of(
-                                        "type", "string",
-                                        "description", "Fully qualified class name (e.g., java.util.ArrayList)")),
-                        "required", List.of("className")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> getTypeHierarchy((String) args.get("className")));
     }
@@ -168,7 +175,7 @@ public class CodeAnalysisTools {
         try {
             IType type = findType(className);
             if (type == null) {
-                return errorResult("Type not found: " + className);
+                return new CallToolResult("Type not found: " + className, true);
             }
 
             ITypeHierarchy hierarchy = type.newTypeHierarchy(new NullProgressMonitor());
@@ -197,10 +204,10 @@ public class CodeAnalysisTools {
             }
             result.put("subclasses", subclasses);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error getting type hierarchy: " + e.getMessage());
+            return new CallToolResult("Error getting type hierarchy: " + e.getMessage(), true);
         }
     }
 
@@ -208,19 +215,23 @@ public class CodeAnalysisTools {
      * Tool: Find all references to a Java element.
      */
     public static ToolRegistration findReferencesTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "elementName", Map.of(
+                                "type", "string",
+                                "description", "Fully qualified element name"),
+                        "elementType", Map.of(
+                                "type", "string",
+                                "description", "Element type: CLASS, METHOD, or FIELD")),
+                List.of("elementName", "elementType"),
+                null, null, null);
+
         Tool tool = new Tool(
                 "jdt_find_references",
                 "Find all references to a class, method, or field in the workspace",
-                Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "elementName", Map.of(
-                                        "type", "string",
-                                        "description", "Fully qualified element name"),
-                                "elementType", Map.of(
-                                        "type", "string",
-                                        "description", "Element type: CLASS, METHOD, or FIELD")),
-                        "required", List.of("elementName", "elementType")));
+                schema,
+                null);
 
         return new ToolRegistration(tool, args -> findReferences(
                 (String) args.get("elementName"),
@@ -243,7 +254,7 @@ public class CodeAnalysisTools {
                     SearchPattern.R_EXACT_MATCH);
 
             if (pattern == null) {
-                return errorResult("Could not create search pattern for: " + elementName);
+                return new CallToolResult("Could not create search pattern for: " + elementName, true);
             }
 
             IJavaSearchScope scope = SearchEngine.createWorkspaceScope();
@@ -278,10 +289,10 @@ public class CodeAnalysisTools {
             result.put("referenceCount", references.size());
             result.put("references", references);
 
-            return successResult(MAPPER.writeValueAsString(result));
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return errorResult("Error finding references: " + e.getMessage());
+            return new CallToolResult("Error finding references: " + e.getMessage(), true);
         }
     }
 
@@ -301,17 +312,5 @@ public class CodeAnalysisTools {
             System.err.println("[JDT MCP] Error finding type: " + e.getMessage());
         }
         return null;
-    }
-
-    private static CallToolResult successResult(String content) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(content)),
-                false);
-    }
-
-    private static CallToolResult errorResult(String message) {
-        return new CallToolResult(
-                List.of(new McpSchema.TextContent(message)),
-                true);
     }
 }

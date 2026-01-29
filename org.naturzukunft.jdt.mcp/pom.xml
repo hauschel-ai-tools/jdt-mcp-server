@@ -21,9 +21,9 @@
 
     <repositories>
         <repository>
-            <id>eclipse-2024-03</id>
+            <id>eclipse-2025-12</id>
             <layout>p2</layout>
-            <url>https://download.eclipse.org/releases/2024-03</url>
+            <url>https://download.eclipse.org/releases/2025-12</url>
         </repository>
     </repositories>
 
@@ -47,6 +47,18 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>2.0.9</version>
+        </dependency>
+
+        <!-- Jetty 12 for embedded HTTP/SSE server -->
+        <dependency>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-server</artifactId>
+            <version>12.0.15</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jetty.ee10</groupId>
+            <artifactId>jetty-ee10-servlet</artifactId>
+            <version>12.0.15</version>
         </dependency>
     </dependencies>
 
@@ -81,6 +93,29 @@
                             <arch>x86_64</arch>
                         </environment>
                     </environments>
+                </configuration>
+            </plugin>
+
+            <!-- Tycho compiler configuration - allow access to internal APIs -->
+            <plugin>
+                <groupId>org.eclipse.tycho</groupId>
+                <artifactId>tycho-compiler-plugin</artifactId>
+                <version>${tycho.version}</version>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-warn:-discouraged,forbidden</arg>
+                    </compilerArgs>
+                    <!-- Ignore access restrictions for internal Eclipse APIs -->
+                    <accessRules>
+                        <accessRule>
+                            <pattern>org/eclipse/jdt/internal/**</pattern>
+                            <kind>accessible</kind>
+                        </accessRule>
+                        <accessRule>
+                            <pattern>org/eclipse/jdt/core/refactoring/**</pattern>
+                            <kind>accessible</kind>
+                        </accessRule>
+                    </accessRules>
                 </configuration>
             </plugin>
 
