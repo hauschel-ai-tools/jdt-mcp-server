@@ -603,21 +603,10 @@ public class ExecutionTools {
                                         testInfo.put("package", pkg.getElementName());
                                         testInfo.put("testType", testType);
 
-                                        // Count test methods
-                                        int testMethodCount = 0;
+                                        // Count test methods (including @Nested inner classes)
                                         List<String> testMethods = new ArrayList<>();
-                                        for (IMethod method : type.getMethods()) {
-                                            for (var annotation : method.getAnnotations()) {
-                                                String annotationName = annotation.getElementName();
-                                                if (annotationName.equals("Test") || annotationName.equals("org.junit.Test")
-                                                        || annotationName.equals("org.junit.jupiter.api.Test")) {
-                                                    testMethodCount++;
-                                                    testMethods.add(method.getElementName());
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        testInfo.put("testMethodCount", testMethodCount);
+                                        collectTestMethods(type, testMethods);
+                                        testInfo.put("testMethodCount", testMethods.size());
                                         testInfo.put("testMethods", testMethods);
 
                                         if (cu.getResource() != null) {
@@ -643,6 +632,36 @@ public class ExecutionTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error listing tests: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Recursively collects test methods from a type and its @Nested inner classes.
+     * This supports JUnit 5's nested test feature where tests can be organized
+     * in inner classes annotated with @Nested.
+     */
+    private static void collectTestMethods(IType type, List<String> testMethods) throws Exception {
+        // Collect test methods from this type
+        for (IMethod method : type.getMethods()) {
+            for (var annotation : method.getAnnotations()) {
+                String annotationName = annotation.getElementName();
+                if (annotationName.equals("Test") || annotationName.equals("org.junit.Test")
+                        || annotationName.equals("org.junit.jupiter.api.Test")) {
+                    testMethods.add(method.getElementName());
+                    break;
+                }
+            }
+        }
+
+        // Recursively check @Nested inner classes (JUnit 5 feature)
+        for (IType innerType : type.getTypes()) {
+            for (var annotation : innerType.getAnnotations()) {
+                String annotationName = annotation.getElementName();
+                if (annotationName.equals("Nested") || annotationName.equals("org.junit.jupiter.api.Nested")) {
+                    collectTestMethods(innerType, testMethods);
+                    break;
+                }
+            }
         }
     }
 
