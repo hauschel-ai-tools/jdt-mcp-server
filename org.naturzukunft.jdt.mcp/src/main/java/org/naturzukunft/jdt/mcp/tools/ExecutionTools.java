@@ -766,9 +766,12 @@ public class ExecutionTools {
             // Configure the launch
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, projectName);
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, fullyQualifiedName);
-            workingCopy.setAttribute("org.eclipse.jdt.junit.CONTAINER", "");
-            workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", methodName != null ? methodName : "");
             workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", "org.eclipse.jdt.junit.loader.junit5");
+
+            // Only set TESTNAME if a specific method is requested
+            if (methodName != null && !methodName.isEmpty()) {
+                workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", methodName);
+            }
 
             // Set up result collection
             final List<Map<String, Object>> testResults = new ArrayList<>();
