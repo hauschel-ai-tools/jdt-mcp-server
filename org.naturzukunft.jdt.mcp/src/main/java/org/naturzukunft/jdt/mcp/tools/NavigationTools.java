@@ -7,15 +7,22 @@ import java.util.Map;
 
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.core.ITypeHierarchy;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.search.IJavaSearchConstants;
 import org.eclipse.jdt.core.search.IJavaSearchScope;
 import org.eclipse.jdt.core.search.SearchEngine;
 import org.eclipse.jdt.core.search.SearchPattern;
 import org.eclipse.jdt.core.search.TypeNameMatch;
+import org.eclipse.jdt.core.search.SearchMatch;
+import org.eclipse.jdt.core.search.SearchParticipant;
+import org.eclipse.jdt.core.search.SearchRequestor;
 import org.eclipse.jdt.core.search.TypeNameMatchRequestor;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
@@ -46,7 +53,10 @@ public class NavigationTools {
 
         Tool tool = new Tool(
                 "jdt_find_type",
-                "Search for Java types (classes, interfaces, enums) by name pattern. Supports wildcards (* and ?)",
+                "🔍 FIND A CLASS: Don't know where a class is? Use this! " +
+                "Search by name with wildcards: '*Service' finds UserService, OrderService, etc. " +
+                "RETURNS: Fully qualified names like 'com.example.UserService' - USE THESE in jdt_get_method_signature, jdt_find_implementations, jdt_rename_element, etc. " +
+                "WORKFLOW: User asks 'find the service class' → jdt_find_type('*Service') → get 'com.example.UserService' → use in other tools.",
                 schema,
                 null);
 
@@ -120,16 +130,19 @@ public class NavigationTools {
                 Map.of(
                         "className", Map.of(
                                 "type", "string",
-                                "description", "Fully qualified class name"),
+                                "description", "Fully qualified class name (e.g., 'com.example.UserService')"),
                         "methodName", Map.of(
                                 "type", "string",
-                                "description", "Method name (use * to get all methods)")),
+                                "description", "Method name to inspect, or '*' to list ALL methods in the class")),
                 List.of("className", "methodName"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_get_method_signature",
-                "Get method signature with parameters, return type, and modifiers",
+                "📋 SEE WHAT A METHOD DOES: Get parameter names, types, return type, exceptions. " +
+                "USE CASE: Need to call a method but don't know its signature? This tells you! " +
+                "TIP: Use methodName='*' to list ALL methods of a class - great for exploring unfamiliar code. " +
+                "RETURNS: Parameter details you need for jdt_find_callers or writing code that calls this method.",
                 schema,
                 null);
 
@@ -193,6 +206,200 @@ public class NavigationTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error getting method signature: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Find implementations of an interface or subclasses of a class.
+     */
+    public static ToolRegistration findImplementationsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("typeName", Map.of(
+                        "type", "string",
+                        "description", "Fully qualified type name (e.g., 'com.example.UserRepository' or 'java.util.List')")),
+                List.of("typeName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_find_implementations",
+                "🔗 FIND ALL SUBCLASSES/IMPLEMENTATIONS: 'What classes implement UserRepository?' or 'What extends BaseController?' " +
+                "USE CASE: Understanding polymorphism - you see 'UserRepository repo' but need to find the ACTUAL implementing class. " +
+                "DIFFERENT FROM jdt_find_references: This finds HIERARCHY (who extends/implements), not USAGES (who calls/uses). " +
+                "RESULT: List of concrete classes - useful for understanding the full inheritance tree.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> findImplementations((String) args.get("typeName")));
+    }
+
+    private static CallToolResult findImplementations(String typeName) {
+        try {
+            IType type = findTypeByName(typeName);
+            if (type == null) {
+                return new CallToolResult("Type not found: " + typeName, true);
+            }
+
+            // Create type hierarchy
+            ITypeHierarchy hierarchy = type.newTypeHierarchy(new NullProgressMonitor());
+
+            List<Map<String, Object>> implementations = new ArrayList<>();
+
+            // Get all subtypes (implementations for interfaces, subclasses for classes)
+            IType[] subtypes = hierarchy.getAllSubtypes(type);
+            for (IType subtype : subtypes) {
+                Map<String, Object> implInfo = new HashMap<>();
+                implInfo.put("simpleName", subtype.getElementName());
+                implInfo.put("fullyQualifiedName", subtype.getFullyQualifiedName());
+                implInfo.put("packageName", subtype.getPackageFragment().getElementName());
+
+                try {
+                    implInfo.put("isClass", subtype.isClass());
+                    implInfo.put("isInterface", subtype.isInterface());
+                    implInfo.put("isAbstract", org.eclipse.jdt.core.Flags.isAbstract(subtype.getFlags()));
+                } catch (Exception e) {
+                    // Ignore
+                }
+
+                if (subtype.getResource() != null) {
+                    implInfo.put("file", subtype.getResource().getLocation().toString());
+                }
+
+                // Get direct supertype info
+                String superclass = subtype.getSuperclassName();
+                if (superclass != null) {
+                    implInfo.put("superclass", superclass);
+                }
+                String[] interfaces = subtype.getSuperInterfaceNames();
+                if (interfaces != null && interfaces.length > 0) {
+                    implInfo.put("interfaces", List.of(interfaces));
+                }
+
+                implementations.add(implInfo);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("typeName", typeName);
+            result.put("isInterface", type.isInterface());
+            result.put("implementationCount", implementations.size());
+            result.put("implementations", implementations);
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error finding implementations: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Find all callers/references to a method.
+     */
+    public static ToolRegistration findCallersTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "className", Map.of(
+                                "type", "string",
+                                "description", "Fully qualified class name containing the method (e.g., 'com.example.UserService')"),
+                        "methodName", Map.of(
+                                "type", "string",
+                                "description", "Method name to find callers for (e.g., 'findById')")),
+                List.of("className", "methodName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_find_callers",
+                "📞 WHO CALLS THIS METHOD? Find all places in the codebase that call a specific method. " +
+                "USE CASE: Before changing a method, know who depends on it! 'If I change saveUser(), what breaks?' " +
+                "RETURNS: Class name, method name, file, line - so you can check/update each caller. " +
+                "WORKFLOW: Want to change API? → jdt_find_callers → see all 15 callers → update them or reconsider the change.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> findCallers(
+                (String) args.get("className"),
+                (String) args.get("methodName")));
+    }
+
+    private static CallToolResult findCallers(String className, String methodName) {
+        try {
+            IType type = findTypeByName(className);
+            if (type == null) {
+                return new CallToolResult("Type not found: " + className, true);
+            }
+
+            // Find the method
+            IMethod targetMethod = null;
+            for (IMethod method : type.getMethods()) {
+                if (method.getElementName().equals(methodName)) {
+                    targetMethod = method;
+                    break;
+                }
+            }
+
+            if (targetMethod == null) {
+                return new CallToolResult("Method not found: " + methodName + " in " + className, true);
+            }
+
+            List<Map<String, Object>> callers = new ArrayList<>();
+
+            // Search for references
+            SearchEngine engine = new SearchEngine();
+            SearchPattern pattern = SearchPattern.createPattern(
+                    targetMethod,
+                    IJavaSearchConstants.REFERENCES);
+
+            IJavaSearchScope scope = SearchEngine.createWorkspaceScope();
+
+            SearchRequestor requestor = new SearchRequestor() {
+                @Override
+                public void acceptSearchMatch(SearchMatch match) {
+                    Map<String, Object> callerInfo = new HashMap<>();
+
+                    Object element = match.getElement();
+                    if (element instanceof IMember member) {
+                        callerInfo.put("callerType", member.getDeclaringType().getFullyQualifiedName());
+                        callerInfo.put("callerMember", member.getElementName());
+
+                        if (member instanceof IMethod m) {
+                            callerInfo.put("callerKind", "method");
+                            try {
+                                callerInfo.put("callerSignature", m.getSignature());
+                            } catch (Exception e) {
+                                // Ignore
+                            }
+                        } else {
+                            callerInfo.put("callerKind", "field_or_initializer");
+                        }
+                    }
+
+                    if (match.getResource() != null) {
+                        callerInfo.put("file", match.getResource().getLocation().toString());
+                        callerInfo.put("offset", match.getOffset());
+                        callerInfo.put("length", match.getLength());
+                    }
+
+                    callers.add(callerInfo);
+                }
+            };
+
+            engine.search(
+                    pattern,
+                    new SearchParticipant[] { SearchEngine.getDefaultSearchParticipant() },
+                    scope,
+                    requestor,
+                    new NullProgressMonitor());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("className", className);
+            result.put("methodName", methodName);
+            result.put("callerCount", callers.size());
+            result.put("callers", callers);
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error finding callers: " + e.getMessage(), true);
         }
     }
 

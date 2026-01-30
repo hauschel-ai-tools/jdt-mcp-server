@@ -21,6 +21,9 @@ public class Activator extends AbstractUIPlugin {
         super.start(context);
         plugin = this;
         System.out.println("[JDT MCP] Plugin activated");
+
+        // Auto-start MCP server
+        startMcpServer();
     }
 
     @Override

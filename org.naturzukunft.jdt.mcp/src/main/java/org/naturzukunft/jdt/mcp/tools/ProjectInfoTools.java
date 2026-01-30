@@ -5,10 +5,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
@@ -42,7 +44,10 @@ public class ProjectInfoTools {
 
         Tool tool = new Tool(
                 "jdt_list_projects",
-                "List all Java projects in the Eclipse workspace",
+                "🚀 START HERE - ALWAYS CALL THIS FIRST! " +
+                "Lists all Java projects in the Eclipse workspace. " +
+                "RETURNS: Project names (you NEED these for ALL other jdt_* tools), locations, Java versions. " +
+                "WORKFLOW: 1) Call this → 2) Pick a project name → 3) Use it in other tools like jdt_find_type, jdt_get_compilation_errors, etc.",
                 schema,
                 null);
 
@@ -65,6 +70,12 @@ public class ProjectInfoTools {
                     String javaVersion = javaProject.getOption(JavaCore.COMPILER_SOURCE, true);
                     projectInfo.put("javaVersion", javaVersion);
 
+                    // Maven multi-module information
+                    Map<String, Object> mavenInfo = parseMavenInfo(project);
+                    if (mavenInfo != null) {
+                        projectInfo.putAll(mavenInfo);
+                    }
+
                     projects.add(projectInfo);
                 }
             }
@@ -81,6 +92,81 @@ public class ProjectInfoTools {
     }
 
     /**
+     * Parse Maven pom.xml for multi-module information.
+     * Extracts: groupId, artifactId, parent info, and modules list.
+     */
+    private static Map<String, Object> parseMavenInfo(IProject project) {
+        try {
+            IFile pomFile = project.getFile("pom.xml");
+            if (!pomFile.exists()) {
+                return null;
+            }
+
+            Map<String, Object> mavenInfo = new HashMap<>();
+            String pomContent = new String(pomFile.getContents().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+
+            // Extract groupId (first occurrence, not inside parent)
+            java.util.regex.Pattern groupIdPattern = java.util.regex.Pattern.compile(
+                "^\\s*<groupId>([^<]+)</groupId>", java.util.regex.Pattern.MULTILINE);
+            java.util.regex.Matcher groupIdMatcher = groupIdPattern.matcher(pomContent);
+            // Skip if inside <parent> block - look for groupId after </parent> or at project level
+            String afterParent = pomContent.replaceFirst("<parent>[\\s\\S]*?</parent>", "");
+            groupIdMatcher = groupIdPattern.matcher(afterParent);
+            if (groupIdMatcher.find()) {
+                mavenInfo.put("mavenGroupId", groupIdMatcher.group(1));
+            }
+
+            // Extract artifactId (first occurrence outside parent)
+            java.util.regex.Pattern artifactIdPattern = java.util.regex.Pattern.compile(
+                "^\\s*<artifactId>([^<]+)</artifactId>", java.util.regex.Pattern.MULTILINE);
+            java.util.regex.Matcher artifactIdMatcher = artifactIdPattern.matcher(afterParent);
+            if (artifactIdMatcher.find()) {
+                mavenInfo.put("mavenArtifactId", artifactIdMatcher.group(1));
+            }
+
+            // Extract parent info
+            java.util.regex.Pattern parentPattern = java.util.regex.Pattern.compile(
+                "<parent>[\\s\\S]*?<groupId>([^<]+)</groupId>[\\s\\S]*?<artifactId>([^<]+)</artifactId>[\\s\\S]*?</parent>");
+            java.util.regex.Matcher parentMatcher = parentPattern.matcher(pomContent);
+            if (parentMatcher.find()) {
+                Map<String, String> parentInfo = new HashMap<>();
+                parentInfo.put("groupId", parentMatcher.group(1));
+                parentInfo.put("artifactId", parentMatcher.group(2));
+                mavenInfo.put("mavenParent", parentInfo);
+            }
+
+            // Extract modules (for aggregator/parent projects)
+            java.util.regex.Pattern modulesPattern = java.util.regex.Pattern.compile(
+                "<modules>([\\s\\S]*?)</modules>");
+            java.util.regex.Matcher modulesMatcher = modulesPattern.matcher(pomContent);
+            if (modulesMatcher.find()) {
+                String modulesContent = modulesMatcher.group(1);
+                java.util.regex.Pattern modulePattern = java.util.regex.Pattern.compile(
+                    "<module>([^<]+)</module>");
+                java.util.regex.Matcher moduleMatcher = modulePattern.matcher(modulesContent);
+
+                List<String> modules = new ArrayList<>();
+                while (moduleMatcher.find()) {
+                    modules.add(moduleMatcher.group(1));
+                }
+                if (!modules.isEmpty()) {
+                    mavenInfo.put("mavenModules", modules);
+                }
+            }
+
+            // Check for Maven Wrapper
+            IFile mvnw = project.getFile("mvnw");
+            mavenInfo.put("hasMavenWrapper", mvnw.exists());
+
+            return mavenInfo.isEmpty() ? null : mavenInfo;
+
+        } catch (Exception e) {
+            // Silently ignore errors reading pom.xml
+            return null;
+        }
+    }
+
+    /**
      * Tool: Get project classpath entries.
      */
     public static ToolRegistration getClasspathTool() {
@@ -88,13 +174,15 @@ public class ProjectInfoTools {
                 "object",
                 Map.of("projectName", Map.of(
                         "type", "string",
-                        "description", "Name of the Java project")),
+                        "description", "Eclipse project name (get from jdt_list_projects, e.g., 'my-app' or 'com.example.myproject')")),
                 List.of("projectName"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_get_classpath",
-                "Get resolved classpath for a Java project (source folders, libraries, output folders)",
+                "Get resolved classpath for a Java project. " +
+                "Returns source folders (where .java files are), libraries (JARs), and output folders (where .class files go). " +
+                "Useful to understand project structure or debug compilation issues.",
                 schema,
                 null);
 
@@ -160,13 +248,15 @@ public class ProjectInfoTools {
                 "object",
                 Map.of("projectName", Map.of(
                         "type", "string",
-                        "description", "Name of the Java project")),
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
                 List.of("projectName"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_get_compilation_errors",
-                "Get all compilation errors and warnings for a Java project",
+                "Get all compilation errors and warnings for a Java project. " +
+                "Returns file location, line number, and error message. " +
+                "TIP: Call jdt_refresh_project first if you modified files externally, otherwise you may see stale errors.",
                 schema,
                 null);
 
@@ -228,13 +318,14 @@ public class ProjectInfoTools {
                 "object",
                 Map.of("projectName", Map.of(
                         "type", "string",
-                        "description", "Name of the Java project")),
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
                 List.of("projectName"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_get_project_structure",
-                "Get overview of project structure (Java version, source folders, packages)",
+                "Get overview of project structure: Java version, source folders, and all packages. " +
+                "Use this to understand the project layout before creating classes or navigating code.",
                 schema,
                 null);
 
@@ -282,6 +373,60 @@ public class ProjectInfoTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error getting project structure: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Refresh project or workspace.
+     */
+    public static ToolRegistration refreshProjectTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Eclipse project name to refresh (optional - omit to refresh entire workspace)")),
+                List.of(),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_refresh_project",
+                "⚠️ CRITICAL: Call this AFTER you use Write/Edit tools or git commands on Java files! " +
+                "WHY: Eclipse doesn't see filesystem changes automatically. Without refresh, you'll get WRONG results from jdt_parse_java_file, jdt_get_compilation_errors, and refactoring tools. " +
+                "WHEN TO CALL: After ANY file modification outside Eclipse → call jdt_refresh_project → then use other JDT tools. " +
+                "COMMON MISTAKE: Forgetting to refresh and wondering why jdt_get_compilation_errors still shows old errors.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> refreshProject((String) args.get("projectName")));
+    }
+
+    private static CallToolResult refreshProject(String projectName) {
+        try {
+            Map<String, Object> result = new HashMap<>();
+
+            if (projectName != null && !projectName.isEmpty()) {
+                // Refresh specific project
+                IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+                if (project == null || !project.exists()) {
+                    return new CallToolResult("Project not found: " + projectName, true);
+                }
+                project.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+                result.put("refreshed", projectName);
+                result.put("scope", "project");
+            } else {
+                // Refresh entire workspace
+                ResourcesPlugin.getWorkspace().getRoot().refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+                result.put("refreshed", "workspace");
+                result.put("scope", "workspace");
+            }
+
+            result.put("status", "SUCCESS");
+            result.put("message", "Refresh completed");
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error refreshing: " + e.getMessage(), true);
         }
     }
 

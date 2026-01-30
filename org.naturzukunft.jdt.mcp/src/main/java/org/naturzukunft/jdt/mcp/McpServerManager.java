@@ -9,6 +9,11 @@ import org.naturzukunft.jdt.mcp.preferences.McpPreferenceConstants;
 import org.naturzukunft.jdt.mcp.server.McpHttpServer;
 import org.naturzukunft.jdt.mcp.server.McpProtocolHandler;
 import org.naturzukunft.jdt.mcp.tools.CodeAnalysisTools;
+import org.naturzukunft.jdt.mcp.tools.CodeGenerationTools;
+import org.naturzukunft.jdt.mcp.tools.CodeQualityTools;
+import org.naturzukunft.jdt.mcp.tools.CreationTools;
+import org.naturzukunft.jdt.mcp.tools.DocumentationTools;
+import org.naturzukunft.jdt.mcp.tools.ExecutionTools;
 import org.naturzukunft.jdt.mcp.tools.NavigationTools;
 import org.naturzukunft.jdt.mcp.tools.ProjectInfoTools;
 import org.naturzukunft.jdt.mcp.tools.RefactoringTools;
@@ -56,20 +61,63 @@ public class McpServerManager {
                 CodeAnalysisTools.parseJavaFileTool(),
                 CodeAnalysisTools.getTypeHierarchyTool(),
                 CodeAnalysisTools.findReferencesTool(),
+                CodeAnalysisTools.getSourceRangeTool(),
 
                 // Navigation Tools
                 NavigationTools.findTypeTool(),
                 NavigationTools.getMethodSignatureTool(),
+                NavigationTools.findImplementationsTool(),
+                NavigationTools.findCallersTool(),
 
                 // Project Info Tools
                 ProjectInfoTools.listProjectsTool(),
                 ProjectInfoTools.getClasspathTool(),
                 ProjectInfoTools.getCompilationErrorsTool(),
                 ProjectInfoTools.getProjectStructureTool(),
+                ProjectInfoTools.refreshProjectTool(),
+
+                // Creation Tools
+                CreationTools.createClassTool(),
+                CreationTools.createInterfaceTool(),
+                CreationTools.createEnumTool(),
+
+                // Code Generation Tools
+                CodeGenerationTools.generateGettersSettersTool(),
+                CodeGenerationTools.generateConstructorTool(),
+                CodeGenerationTools.generateEqualsHashCodeTool(),
+                CodeGenerationTools.generateToStringTool(),
+                CodeGenerationTools.generateDelegateMethodsTool(),
 
                 // Refactoring Tools
                 RefactoringTools.renameElementTool(),
-                RefactoringTools.extractMethodTool()
+                RefactoringTools.extractMethodTool(),
+                RefactoringTools.moveTypeTool(),
+                RefactoringTools.organizeImportsTool(),
+                RefactoringTools.inlineTool(),
+                RefactoringTools.extractInterfaceTool(),
+                RefactoringTools.changeMethodSignatureTool(),
+                RefactoringTools.convertToLambdaTool(),
+                RefactoringTools.encapsulateFieldTool(),
+                RefactoringTools.introduceParameterTool(),
+
+                // Execution Tools
+                ExecutionTools.mavenBuildTool(),
+                ExecutionTools.runMainTool(),
+                ExecutionTools.listUnitTestsTool(),
+                ExecutionTools.listIntegrationTestsTool(),
+                ExecutionTools.runUnitTestsTool(),
+                ExecutionTools.runIntegrationTestsTool(),
+
+                // Documentation Tools
+                DocumentationTools.getJavadocTool(),
+                DocumentationTools.getAnnotationsTool(),
+                DocumentationTools.findAnnotatedElementsTool(),
+                DocumentationTools.generateJavadocTool(),
+
+                // Code Quality Tools
+                CodeQualityTools.quickFixTool(),
+                CodeQualityTools.findUnusedCodeTool(),
+                CodeQualityTools.findDeadCodeTool()
             };
 
             // Register tools with protocol handler

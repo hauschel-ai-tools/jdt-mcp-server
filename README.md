@@ -6,58 +6,125 @@ Ein Eclipse-Plugin, das einen MCP (Model Context Protocol) Server einbettet, um 
 
 ## Features
 
-Das Plugin stellt 11 MCP-Tools bereit:
+Das Plugin stellt **44 MCP-Tools** in 9 Kategorien bereit:
+
+### Project Info (5 Tools)
 
 | Tool | Beschreibung |
 |------|-------------|
-| `jdt_list_projects` | Alle Java-Projekte im Workspace auflisten |
-| `jdt_get_classpath` | Classpath eines Projekts abrufen |
-| `jdt_get_compilation_errors` | Kompilierungsfehler und Warnungen |
-| `jdt_get_project_structure` | Projektstruktur-Übersicht |
-| `jdt_parse_java_file` | Java-Datei parsen (Package, Imports, Typen, Methoden, Felder) |
-| `jdt_get_type_hierarchy` | Typhierarchie abrufen (Superklassen, Interfaces, Subklassen) |
-| `jdt_find_references` | Referenzen auf Klassen, Methoden oder Felder finden |
-| `jdt_find_type` | Typen nach Namensmuster suchen (Wildcards unterstützt) |
-| `jdt_get_method_signature` | Methodensignaturen mit Parametern und Rückgabetyp |
-| `jdt_rename_element` | Java-Element umbenennen (Refactoring) |
-| `jdt_extract_method` | Code in neue Methode extrahieren (Preview) |
+| `jdt_list_projects` | **START HERE**: Alle Java-Projekte im Workspace auflisten. Gibt Projektnamen zurück, die in anderen Tools verwendet werden. |
+| `jdt_get_classpath` | Classpath eines Projekts abrufen (Source-Folder, Libraries, Output-Folder) |
+| `jdt_get_compilation_errors` | Kompilierungsfehler und Warnungen mit Datei, Zeile und Nachricht |
+| `jdt_get_project_structure` | Projektstruktur-Übersicht (Java-Version, Source-Folder, Packages) |
+| `jdt_refresh_project` | **WICHTIG**: Workspace aktualisieren nach externen Dateiänderungen (Write/Edit, git). Ohne Refresh arbeiten JDT-Tools auf veralteten Daten! |
+
+### Navigation (4 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_find_type` | Typen nach Namensmuster suchen. Wildcards: `*` = beliebig, `?` = ein Zeichen. Beispiele: `*Service`, `User*` |
+| `jdt_get_method_signature` | Methodensignaturen mit Parametern, Rückgabetyp, Modifiern. `*` für alle Methoden einer Klasse. |
+| `jdt_find_implementations` | Alle IMPLEMENTIERUNGEN eines Interfaces oder SUBKLASSEN einer Klasse finden |
+| `jdt_find_callers` | Alle AUFRUFER einer Methode finden. Gibt Klasse, Methode und Position zurück. |
+
+### Code Analysis (4 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_parse_java_file` | Java-Datei parsen: Package, Imports, Typen, Methoden, Felder mit Offsets |
+| `jdt_get_type_hierarchy` | Typhierarchie: Superklassen, Interfaces, Subklassen |
+| `jdt_find_references` | ALLE Verwendungen einer Klasse/Methode/Feld im Workspace finden |
+| `jdt_get_source_range` | **QUELLCODE LESEN**: Gibt den tatsächlichen Code einer Methode/Klasse als Text zurück |
+
+### Creation (3 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_create_class` | Neue Java-Klasse erstellen. Erstellt Package falls nötig. |
+| `jdt_create_interface` | Neues Java-Interface erstellen |
+| `jdt_create_enum` | Neues Java-Enum mit Konstanten erstellen |
+
+### Code Generation (5 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_generate_getters_setters` | Getter/Setter für Felder generieren. Überspringt existierende. |
+| `jdt_generate_constructor` | Konstruktor(en) generieren. Optional: No-Args für JPA/Jackson. |
+| `jdt_generate_equals_hashcode` | equals() und hashCode() mit java.util.Objects generieren |
+| `jdt_generate_tostring` | toString() generieren: `User{id=1, name='John'}` |
+| `jdt_generate_delegate_methods` | **DELEGATION PATTERN**: Methoden generieren die an ein anderes Objekt delegieren |
+
+### Refactoring (10 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_rename_element` | SICHERES UMBENENNEN: Klasse/Methode/Feld umbenennen, alle Referenzen aktualisieren |
+| `jdt_extract_method` | Code in neue Methode extrahieren. Parameter/Rückgabetyp automatisch erkannt. |
+| `jdt_move_type` | Klasse in anderes Package verschieben, alle Imports aktualisieren |
+| `jdt_organize_imports` | Imports aufräumen: unbenutzte entfernen, sortieren |
+| `jdt_inline` | Variable/Ausdruck inlinen (Gegenteil von Extract) |
+| `jdt_extract_interface` | Interface aus Klasse extrahieren - für bessere Abstraktion |
+| `jdt_change_method_signature` | Methodensignatur ändern (Parameter hinzufügen/entfernen), alle Aufrufer aktualisieren |
+| `jdt_convert_to_lambda` | Anonyme Klasse zu Lambda-Ausdruck konvertieren |
+| `jdt_encapsulate_field` | Feld kapseln: private machen + Getter/Setter, alle Zugriffe aktualisieren |
+| `jdt_introduce_parameter` | Lokale Variable als Methodenparameter extrahieren |
+
+### Execution (6 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_maven_build` | Maven-Build ausführen: clean, compile, package, install, verify |
+| `jdt_run_main` | Java-Klasse mit main() ausführen, stdout/stderr erfassen |
+| `jdt_list_unit_tests` | Unit-Tests auflisten (*Test.java, Test*.java) |
+| `jdt_list_integration_tests` | Integration-Tests auflisten (*IT.java, *IntegrationTest.java) |
+| `jdt_run_unit_tests` | Unit-Tests via `mvn test` ausführen |
+| `jdt_run_integration_tests` | Integration-Tests via `mvn verify` ausführen |
+
+### Documentation (4 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_get_javadoc` | Javadoc für Klasse/Methode/Feld abrufen (inkl. @param, @return, @throws) |
+| `jdt_get_annotations` | Alle Annotationen eines Elements mit Werten abrufen (@Entity, @Column(name="...")) |
+| `jdt_find_annotated_elements` | Alle Elemente mit bestimmter Annotation finden (@Service, @Test, @Entity) |
+| `jdt_generate_javadoc` | Javadoc-Kommentar generieren mit @param, @return, @throws |
+
+### Code Quality (3 Tools)
+
+| Tool | Beschreibung |
+|------|-------------|
+| `jdt_quick_fix` | **FEHLER AUTOMATISCH BEHEBEN**: Import hinzufügen, Cast korrigieren, Typos fixen |
+| `jdt_find_unused_code` | Unbenutzte Imports, private Felder und Methoden finden |
+| `jdt_find_dead_code` | Unerreichbaren Code finden (nach return/throw, tote Branches) |
 
 ## Voraussetzungen
 
 - Java 17+
-- Eclipse IDE 2024-03 oder neuer
+- Eclipse IDE 2025-12 oder neuer
 - Maven 3.9+
 
 ## Build
 
-### Lokaler Build
-
 ```bash
-# Dependencies in lib/ kopieren
-mvn dependency:copy-dependencies -DoutputDirectory=lib
-
-# Plugin bauen
-mvn clean verify
+mvn clean package -DskipTests
 ```
 
-### P2 Update Site erstellen
-
-Für ein vollständiges P2-Repository wird ein Parent-Projekt mit Feature und Update-Site benötigt. Siehe Abschnitt "Projekt-Struktur für P2 Repository".
+Das P2-Repository wird erstellt unter: `org.naturzukunft.jdt.mcp.site/target/repository`
 
 ## Installation
 
-### Option 1: Aus Source in Eclipse PDE
-
-1. Repository klonen
-2. In Eclipse: `File > Import > Existing Projects into Workspace`
-3. Projekt `org.naturzukunft.jdt.mcp` auswählen
-4. `Run > Run As > Eclipse Application`
-
-### Option 2: Via P2 Update Site
+### Option 1: Via P2 Update Site
 
 1. In Eclipse: `Help > Install New Software...`
 2. URL hinzufügen: `https://naturzukunft.codeberg.page/jdt-mcp-server/`
 3. "Eclipse JDT MCP Server" auswählen und installieren
+
+### Option 2: Aus Source in Eclipse PDE
+
+1. Repository klonen
+2. In Eclipse: `File > Import > Existing Projects into Workspace`
+3. Alle Projekte auswählen
+4. `Run > Run As > Eclipse Application`
 
 ## Konfiguration
 
@@ -67,15 +134,28 @@ Für ein vollständiges P2-Repository wird ein Parent-Projekt mit Feature und Up
 
 | Einstellung | Beschreibung | Standard |
 |-------------|--------------|----------|
-| Enable MCP Server | Server aktivieren/deaktivieren | false |
+| Enable MCP Server | Server aktivieren/deaktivieren | true |
 | Port Range Start | Erster Port für dynamische Zuweisung | 51000 |
 | Port Range End | Letzter Port für dynamische Zuweisung | 51100 |
 
 ### AI Client Konfiguration
 
-#### Claude Code
+#### Claude Code (empfohlen: HTTP Transport)
 
-In `~/.claude.json` oder Projekt-`.claude.json`:
+In `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "eclipse-jdt": {
+      "url": "http://localhost:51000/mcp",
+      "type": "http"
+    }
+  }
+}
+```
+
+#### Alternative: SSE Transport
 
 ```json
 {
@@ -88,256 +168,51 @@ In `~/.claude.json` oder Projekt-`.claude.json`:
 }
 ```
 
-#### Cursor
-
-In `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "eclipse-jdt": {
-      "url": "http://localhost:51000/sse",
-      "transport": "sse"
-    }
-  }
-}
-```
-
-**Hinweis:** Der tatsächliche Port wird in der Eclipse-Konsole angezeigt und kann in den Preferences abgelesen werden.
-
-## Projekt-Struktur für P2 Repository
-
-Für ein vollständiges P2-Repository mit Update-Site:
-
-```
-jdt-mcp-server/
-├── pom.xml                              # Parent POM
-├── org.naturzukunft.jdt.mcp/            # Plugin
-├── org.naturzukunft.jdt.mcp.feature/    # Feature
-└── org.naturzukunft.jdt.mcp.site/       # P2 Update Site
-```
-
-### Parent POM (pom.xml im Root)
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-
-    <groupId>org.naturzukunft.jdt</groupId>
-    <artifactId>jdt-mcp-server-parent</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <packaging>pom</packaging>
-
-    <modules>
-        <module>org.naturzukunft.jdt.mcp</module>
-        <module>org.naturzukunft.jdt.mcp.feature</module>
-        <module>org.naturzukunft.jdt.mcp.site</module>
-    </modules>
-
-    <properties>
-        <tycho.version>4.0.4</tycho.version>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-
-    <repositories>
-        <repository>
-            <id>eclipse-2024-03</id>
-            <layout>p2</layout>
-            <url>https://download.eclipse.org/releases/2024-03</url>
-        </repository>
-    </repositories>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.eclipse.tycho</groupId>
-                <artifactId>tycho-maven-plugin</artifactId>
-                <version>${tycho.version}</version>
-                <extensions>true</extensions>
-            </plugin>
-            <plugin>
-                <groupId>org.eclipse.tycho</groupId>
-                <artifactId>target-platform-configuration</artifactId>
-                <version>${tycho.version}</version>
-                <configuration>
-                    <environments>
-                        <environment>
-                            <os>linux</os>
-                            <ws>gtk</ws>
-                            <arch>x86_64</arch>
-                        </environment>
-                        <environment>
-                            <os>win32</os>
-                            <ws>win32</ws>
-                            <arch>x86_64</arch>
-                        </environment>
-                        <environment>
-                            <os>macosx</os>
-                            <ws>cocoa</ws>
-                            <arch>x86_64</arch>
-                        </environment>
-                    </environments>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-```
-
-## CI/CD mit Woodpecker
-
-Das Repository enthält eine `.woodpecker.yml` für automatische Builds auf Codeberg.
-
-Bei jedem Push auf `main`:
-1. Maven Build
-2. P2 Repository erstellen
-3. Deployment auf Codeberg Pages
+**Hinweis:** Der tatsächliche Port wird in der Eclipse-Konsole angezeigt.
 
 ## Tool-Referenz
 
-### jdt_list_projects
+### Typischer Workflow
 
-Listet alle Java-Projekte im Eclipse Workspace.
+1. **Start**: `jdt_list_projects` aufrufen um verfügbare Projekte zu sehen
+2. **Erkunden**: `jdt_get_project_structure` für Übersicht, `jdt_find_type` zum Suchen
+3. **Analysieren**: `jdt_parse_java_file` für Datei-Details, `jdt_find_references` für Verwendungen
+4. **Ändern**: `jdt_create_class`, `jdt_generate_*`, `jdt_rename_element`
+5. **Aktualisieren**: `jdt_refresh_project` nach externen Änderungen
+6. **Bauen/Testen**: `jdt_maven_build`, `jdt_run_unit_tests`
 
-**Parameter:** keine
+### Parameter-Formate
 
-**Beispiel-Antwort:**
-```json
-{
-  "projectCount": 2,
-  "projects": [
-    {
-      "name": "my-project",
-      "location": "/home/user/workspace/my-project",
-      "open": true,
-      "javaVersion": "17"
-    }
-  ]
-}
-```
-
-### jdt_parse_java_file
-
-Parst eine Java-Datei und gibt die Struktur zurück.
-
-**Parameter:**
-- `filePath` (string, required): Absoluter Pfad zur Java-Datei
-
-**Beispiel-Antwort:**
-```json
-{
-  "packageName": "com.example",
-  "imports": ["java.util.List", "java.util.Map"],
-  "types": [
-    {
-      "name": "MyClass",
-      "fullyQualifiedName": "com.example.MyClass",
-      "isClass": true,
-      "isInterface": false,
-      "methods": [...],
-      "fields": [...]
-    }
-  ]
-}
-```
-
-### jdt_get_type_hierarchy
-
-Gibt die Typhierarchie für eine Klasse zurück.
-
-**Parameter:**
-- `className` (string, required): Voll qualifizierter Klassenname
-
-### jdt_find_references
-
-Findet alle Referenzen auf ein Java-Element.
-
-**Parameter:**
-- `elementName` (string, required): Voll qualifizierter Elementname
-- `elementType` (string, required): `CLASS`, `METHOD` oder `FIELD`
-
-### jdt_find_type
-
-Sucht nach Typen im Workspace.
-
-**Parameter:**
-- `pattern` (string, required): Namensmuster (Wildcards `*` und `?` unterstützt)
-
-### jdt_get_method_signature
-
-Gibt Methodensignaturen zurück.
-
-**Parameter:**
-- `className` (string, required): Voll qualifizierter Klassenname
-- `methodName` (string, required): Methodenname (oder `*` für alle)
-
-### jdt_get_classpath
-
-Gibt den aufgelösten Classpath zurück.
-
-**Parameter:**
-- `projectName` (string, required): Name des Java-Projekts
-
-### jdt_get_compilation_errors
-
-Gibt Kompilierungsfehler und Warnungen zurück.
-
-**Parameter:**
-- `projectName` (string, required): Name des Java-Projekts
-
-### jdt_get_project_structure
-
-Gibt eine Übersicht der Projektstruktur zurück.
-
-**Parameter:**
-- `projectName` (string, required): Name des Java-Projekts
-
-### jdt_rename_element
-
-Benennt ein Java-Element um (mit Refactoring-Unterstützung).
-
-**Parameter:**
-- `elementName` (string, required): Aktueller voll qualifizierter Name
-- `newName` (string, required): Neuer Name
-- `elementType` (string, required): `CLASS`, `METHOD` oder `FIELD`
-
-### jdt_extract_method
-
-Extrahiert Code in eine neue Methode (Preview).
-
-**Parameter:**
-- `filePath` (string, required): Absoluter Dateipfad
-- `startOffset` (integer, required): Start-Offset der Selektion
-- `endOffset` (integer, required): End-Offset der Selektion
-- `methodName` (string, required): Name für die neue Methode
+- **projectName**: Eclipse-Projektname (von `jdt_list_projects`)
+- **className** (fully qualified): `com.example.MyClass` (Package + Klasse)
+- **methodName/fieldName**: `com.example.MyClass#methodName`
+- **filePath**: Absoluter Pfad, z.B. `/home/user/project/src/main/java/com/example/MyClass.java`
+- **offset**: Zeichenposition in Datei (von `jdt_parse_java_file`)
 
 ## Troubleshooting
 
 ### Server startet nicht
 
-1. Prüfen ob "Enable MCP Server" in Preferences aktiviert ist
-2. Eclipse-Konsole auf Fehlermeldungen prüfen
-3. Port-Bereich prüfen (keine Konflikte mit anderen Diensten)
+1. Eclipse-Konsole auf `[JDT MCP]` Meldungen prüfen
+2. Port-Bereich prüfen (keine Konflikte mit anderen Diensten)
 
 ### AI Client verbindet nicht
 
-1. Korrekten Port in der Eclipse-Konsole ablesen
-2. URL-Format prüfen: `http://localhost:PORT/sse`
+1. Korrekten Port in der Eclipse-Konsole ablesen: `[JDT MCP] HTTP Server started on port XXXXX`
+2. HTTP Transport bevorzugen: `"type": "http"` mit `/mcp` Endpoint
 3. Firewall-Einstellungen prüfen
+
+### Veraltete Daten nach Dateiänderungen
+
+`jdt_refresh_project` aufrufen! Eclipse erkennt externe Änderungen nicht automatisch.
 
 ### Port-Konflikt mit Spring Tools MCP
 
-Spring Tools MCP verwendet standardmäßig Port 50627. Dieses Plugin verwendet 51000-51100 um Konflikte zu vermeiden.
+Spring Tools MCP verwendet Port 50627. Dieses Plugin verwendet 51000-51100 um Konflikte zu vermeiden.
 
 ## Lizenz
 
 [EUPL-1.2](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12) - European Union Public Licence
-
-Siehe [LICENSE](LICENSE) für den vollständigen Lizenztext.
 
 ## Mitwirken
 

@@ -6,15 +6,15 @@
 
     <!-- SEO Meta Tags -->
     <title>Eclipse JDT MCP Server - P2 Update Site</title>
-    <meta name="description" content="Eclipse Plugin für MCP (Model Context Protocol) Server Integration. Ermöglicht KI-Coding-Assistenten wie Claude Code und Cursor Zugriff auf Eclipse JDT Funktionen.">
-    <meta name="keywords" content="Eclipse, JDT, MCP, Model Context Protocol, Claude Code, Cursor, AI, Java Development Tools, Plugin, IDE Integration">
+    <meta name="description" content="Eclipse Plugin mit 44 MCP Tools für KI-Coding-Assistenten wie Claude Code und Cursor. Refactoring, Code-Generierung, Tests, Quick-Fix, Javadoc, Annotations.">
+    <meta name="keywords" content="Eclipse, JDT, MCP, Model Context Protocol, Claude Code, Cursor, AI, Java Development Tools, Plugin, IDE Integration, Refactoring, Code Generation">
     <meta name="author" content="naturzukunft">
     <meta name="robots" content="index, follow">
 
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Eclipse JDT MCP Server">
-    <meta property="og:description" content="Eclipse Plugin für MCP Server Integration - KI-Assistenten für Java-Entwicklung">
+    <meta property="og:title" content="Eclipse JDT MCP Server - 44 Tools for AI Assistants">
+    <meta property="og:description" content="Eclipse Plugin mit 44 MCP Tools: Refactoring, Code-Generierung, Tests, Quick-Fix, Javadoc für KI-Assistenten">
     <meta property="og:url" content="https://naturzukunft.codeberg.page/jdt-mcp-server/">
 
     <!-- Canonical URL -->
@@ -44,7 +44,7 @@
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1000px;
             margin: 0 auto;
             background: white;
             padding: 2rem;
@@ -69,10 +69,21 @@
         h3 {
             color: var(--secondary);
             margin: 1.5rem 0 0.5rem;
+            font-size: 1rem;
         }
 
         p {
             margin-bottom: 1rem;
+        }
+
+        .badge {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
         }
 
         .update-site-url {
@@ -141,21 +152,35 @@
             padding: 0;
         }
 
-        .tools-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 0.5rem;
-            list-style: none;
+        .tools-category {
             margin: 1rem 0;
+            padding: 1rem;
+            background: #fafafa;
+            border-radius: 8px;
+            border-left: 4px solid var(--secondary);
         }
 
-        .tools-list li {
-            background: #f4f4f4;
-            padding: 0.5rem 0.75rem;
+        .tools-category h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .tool-item {
+            background: white;
+            padding: 0.4rem 0.6rem;
             border-radius: 4px;
             font-family: monospace;
-            font-size: 0.85rem;
-            border-left: 3px solid var(--secondary);
+            font-size: 0.8rem;
+            border: 1px solid #eee;
         }
 
         .install-steps {
@@ -203,7 +228,7 @@
 
         .links-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 1rem;
             margin: 1.5rem 0;
         }
@@ -231,26 +256,6 @@
             font-size: 0.85rem;
             color: #666;
             margin: 0.5rem 0 0;
-        }
-
-        .config-tabs {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: -1px;
-        }
-
-        .config-tab {
-            padding: 0.5rem 1rem;
-            background: #eee;
-            border: 1px solid #ddd;
-            border-bottom: none;
-            border-radius: 4px 4px 0 0;
-            cursor: pointer;
-        }
-
-        .config-tab.active {
-            background: #2c3e50;
-            color: white;
         }
 
         footer {
@@ -282,11 +287,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>Eclipse JDT MCP Server</h1>
+        <h1>Eclipse JDT MCP Server <span class="badge">44 Tools</span></h1>
 
         <p>
             Ein Eclipse-Plugin, das einen <strong>MCP (Model Context Protocol) Server</strong> einbettet,
-            um Eclipse JDT-Funktionen für KI-Coding-Assistenten bereitzustellen.
+            um Eclipse JDT-Funktionen für KI-Coding-Assistenten wie Claude Code und Cursor bereitzustellen.
         </p>
 
         <h2>P2 Update Site</h2>
@@ -300,51 +305,44 @@
 
         <ol class="install-steps">
             <li>
-                <strong>Eclipse öffnen</strong><br>
-                Eclipse IDE for Java Developers (2024-03 oder neuer) starten
+                <strong>Eclipse starten</strong><br>
+                Eclipse IDE for Java Developers (2025-12 oder neuer)
             </li>
             <li>
-                <strong>Install New Software öffnen</strong><br>
-                Menü: <code>Help → Install New Software...</code>
+                <strong>Install New Software</strong><br>
+                Menü: <code>Help > Install New Software...</code>
             </li>
             <li>
                 <strong>Update Site hinzufügen</strong><br>
-                Auf <code>Add...</code> klicken und die URL eingeben:<br>
-                <code>https://naturzukunft.codeberg.page/jdt-mcp-server/</code>
+                Auf <code>Add...</code> klicken und die URL eingeben
             </li>
             <li>
-                <strong>Plugin auswählen</strong><br>
-                "Eclipse JDT MCP Server" anhaken und <code>Next</code> klicken
+                <strong>Plugin installieren</strong><br>
+                "Eclipse JDT MCP Server" anhaken und <code>Next</code>
             </li>
             <li>
-                <strong>Installation abschließen</strong><br>
-                Lizenz akzeptieren, installieren und Eclipse neu starten
-            </li>
-            <li>
-                <strong>MCP Server aktivieren</strong><br>
-                <code>Window → Preferences → JDT MCP Server</code><br>
-                "Enable MCP Server" aktivieren
+                <strong>Eclipse neu starten</strong><br>
+                Der MCP Server startet automatisch auf Port 51000+
             </li>
         </ol>
 
         <h2>KI-Assistent konfigurieren</h2>
 
         <div class="card">
-            <h4>Claude Code</h4>
-            <p>In <code>~/.claude.json</code> oder Projekt-<code>.claude.json</code>:</p>
+            <h4>Claude Code (empfohlen: HTTP Transport)</h4>
+            <p>In <code>~/.claude/settings.json</code>:</p>
             <pre><code>{
   "mcpServers": {
     "eclipse-jdt": {
-      "url": "http://localhost:51000/sse",
-      "transport": "sse"
+      "url": "http://localhost:51000/mcp",
+      "type": "http"
     }
   }
 }</code></pre>
         </div>
 
         <div class="card">
-            <h4>Cursor</h4>
-            <p>In <code>.cursor/mcp.json</code>:</p>
+            <h4>Alternative: SSE Transport</h4>
             <pre><code>{
   "mcpServers": {
     "eclipse-jdt": {
@@ -355,22 +353,107 @@
 }</code></pre>
         </div>
 
-        <p><strong>Hinweis:</strong> Der tatsächliche Port wird in der Eclipse-Konsole angezeigt (Standard: 51000-51100).</p>
+        <p><strong>Hinweis:</strong> Port in Eclipse-Konsole prüfen: <code>[JDT MCP] HTTP Server started on port XXXXX</code></p>
 
-        <h2>Verfügbare MCP Tools</h2>
-        <ul class="tools-list">
-            <li>jdt_list_projects</li>
-            <li>jdt_get_classpath</li>
-            <li>jdt_get_compilation_errors</li>
-            <li>jdt_get_project_structure</li>
-            <li>jdt_parse_java_file</li>
-            <li>jdt_get_type_hierarchy</li>
-            <li>jdt_find_references</li>
-            <li>jdt_find_type</li>
-            <li>jdt_get_method_signature</li>
-            <li>jdt_rename_element</li>
-            <li>jdt_extract_method</li>
-        </ul>
+        <h2>Verfügbare MCP Tools (44)</h2>
+
+        <div class="tools-category">
+            <h3>Project Info (5)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_list_projects</div>
+                <div class="tool-item">jdt_get_classpath</div>
+                <div class="tool-item">jdt_get_compilation_errors</div>
+                <div class="tool-item">jdt_get_project_structure</div>
+                <div class="tool-item">jdt_refresh_project</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Navigation (4)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_find_type</div>
+                <div class="tool-item">jdt_get_method_signature</div>
+                <div class="tool-item">jdt_find_implementations</div>
+                <div class="tool-item">jdt_find_callers</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Code Analysis (4)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_parse_java_file</div>
+                <div class="tool-item">jdt_get_type_hierarchy</div>
+                <div class="tool-item">jdt_find_references</div>
+                <div class="tool-item">jdt_get_source_range</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Creation (3)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_create_class</div>
+                <div class="tool-item">jdt_create_interface</div>
+                <div class="tool-item">jdt_create_enum</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Code Generation (5)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_generate_getters_setters</div>
+                <div class="tool-item">jdt_generate_constructor</div>
+                <div class="tool-item">jdt_generate_equals_hashcode</div>
+                <div class="tool-item">jdt_generate_tostring</div>
+                <div class="tool-item">jdt_generate_delegate_methods</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Refactoring (10)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_rename_element</div>
+                <div class="tool-item">jdt_extract_method</div>
+                <div class="tool-item">jdt_move_type</div>
+                <div class="tool-item">jdt_organize_imports</div>
+                <div class="tool-item">jdt_inline</div>
+                <div class="tool-item">jdt_extract_interface</div>
+                <div class="tool-item">jdt_change_method_signature</div>
+                <div class="tool-item">jdt_convert_to_lambda</div>
+                <div class="tool-item">jdt_encapsulate_field</div>
+                <div class="tool-item">jdt_introduce_parameter</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Execution (6)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_maven_build</div>
+                <div class="tool-item">jdt_run_main</div>
+                <div class="tool-item">jdt_list_unit_tests</div>
+                <div class="tool-item">jdt_list_integration_tests</div>
+                <div class="tool-item">jdt_run_unit_tests</div>
+                <div class="tool-item">jdt_run_integration_tests</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Documentation (4)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_get_javadoc</div>
+                <div class="tool-item">jdt_get_annotations</div>
+                <div class="tool-item">jdt_find_annotated_elements</div>
+                <div class="tool-item">jdt_generate_javadoc</div>
+            </div>
+        </div>
+
+        <div class="tools-category">
+            <h3>Code Quality (3)</h3>
+            <div class="tools-grid">
+                <div class="tool-item">jdt_quick_fix</div>
+                <div class="tool-item">jdt_find_unused_code</div>
+                <div class="tool-item">jdt_find_dead_code</div>
+            </div>
+        </div>
 
         <h2>Links</h2>
 
@@ -380,8 +463,8 @@
                 <p>Repository auf Codeberg</p>
             </div>
             <div class="link-card">
-                <a href="https://codeberg.org/naturzukunft/jdt-mcp-server/src/branch/main/org.naturzukunft.jdt.mcp/README.md">Dokumentation</a>
-                <p>Ausführliche Anleitung</p>
+                <a href="https://codeberg.org/naturzukunft/jdt-mcp-server/src/branch/main/README.md">Dokumentation</a>
+                <p>Alle 44 Tools erklärt</p>
             </div>
             <div class="link-card">
                 <a href="https://codeberg.org/naturzukunft/jdt-mcp-server/issues">Issues</a>
@@ -391,21 +474,13 @@
                 <a href="https://modelcontextprotocol.io">MCP Spezifikation</a>
                 <p>Model Context Protocol</p>
             </div>
-            <div class="link-card">
-                <a href="https://www.eclipse.org/downloads/">Eclipse Download</a>
-                <p>Eclipse IDE herunterladen</p>
-            </div>
-            <div class="link-card">
-                <a href="https://claude.ai/claude-code">Claude Code</a>
-                <p>AI Coding Assistant</p>
-            </div>
         </div>
 
         <footer>
             <p>Inspiriert von <a href="https://spring.io/blog/2025/12/04/towards-spring-tools-5-part3/">Spring Tools 5 MCP Server</a> von Martin Lippert</p>
             <p>
                 <a href="https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12">EUPL-1.2 Lizenz</a> ·
-                © 2025 naturzukunft
+                © 2025-2026 naturzukunft
             </p>
         </footer>
     </div>
@@ -432,7 +507,7 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Eclipse JDT MCP Server",
-        "description": "Eclipse Plugin für MCP Server Integration - ermöglicht KI-Coding-Assistenten Zugriff auf Java Development Tools",
+        "description": "Eclipse Plugin mit 44 MCP Tools für KI-Coding-Assistenten: Refactoring, Code-Generierung, Tests, Quick-Fix, Javadoc",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Windows, macOS, Linux",
         "offers": {
@@ -446,7 +521,7 @@
         },
         "license": "https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12",
         "downloadUrl": "https://naturzukunft.codeberg.page/jdt-mcp-server/",
-        "softwareRequirements": "Eclipse IDE 2024-03+, Java 17+"
+        "softwareRequirements": "Eclipse IDE 2025-12+, Java 17+"
     }
     </script>
 </body>

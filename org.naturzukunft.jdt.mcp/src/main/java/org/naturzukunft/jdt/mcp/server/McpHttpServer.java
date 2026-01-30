@@ -46,8 +46,11 @@ public class McpHttpServer {
         // SSE endpoint - for establishing SSE connection
         context.addServlet(new ServletHolder(new SseServlet()), "/sse");
 
-        // Message endpoint - for sending messages to the server
+        // Message endpoint - for sending messages to the server (SSE mode)
         context.addServlet(new ServletHolder(new MessageServlet()), "/message");
+
+        // MCP HTTP endpoint - direct HTTP transport (like Spring Tools MCP)
+        context.addServlet(new ServletHolder(new McpHttpServlet()), "/mcp");
 
         server.setHandler(context);
     }
@@ -58,6 +61,7 @@ public class McpHttpServer {
     public void start() throws Exception {
         server.start();
         System.out.println("[JDT MCP] HTTP Server started on port " + port);
+        System.out.println("[JDT MCP] MCP HTTP endpoint: http://localhost:" + port + "/mcp (recommended)");
         System.out.println("[JDT MCP] SSE endpoint: http://localhost:" + port + "/sse");
         System.out.println("[JDT MCP] Message endpoint: http://localhost:" + port + "/message");
     }
@@ -110,6 +114,57 @@ public class McpHttpServer {
     }
 
     /**
+     * MCP HTTP Servlet - direct HTTP transport (like Spring Tools MCP).
+     * Handles JSON-RPC requests synchronously.
+     */
+    private class McpHttpServlet extends HttpServlet {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        protected void doPost(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+
+            // CORS headers
+            resp.setHeader("Access-Control-Allow-Origin", "*");
+            resp.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+            resp.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+            // Read request body
+            StringBuilder body = new StringBuilder();
+            String line;
+            while ((line = req.getReader().readLine()) != null) {
+                body.append(line);
+            }
+
+            String requestJson = body.toString();
+            System.out.println("[JDT MCP] HTTP Request: " + requestJson);
+
+            // Process the message
+            String responseJson = protocolHandler.handleMessage(requestJson);
+
+            System.out.println("[JDT MCP] HTTP Response: " + responseJson);
+
+            // Return response
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.setContentType("application/json");
+            resp.setCharacterEncoding("UTF-8");
+            if (responseJson != null) {
+                resp.getWriter().write(responseJson);
+            }
+        }
+
+        @Override
+        protected void doOptions(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+            // CORS preflight
+            resp.setHeader("Access-Control-Allow-Origin", "*");
+            resp.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+            resp.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            resp.setStatus(HttpServletResponse.SC_OK);
+        }
+    }
+
+    /**
      * SSE Servlet - handles SSE connection establishment.
      */
     private class SseServlet extends HttpServlet {
@@ -139,8 +194,8 @@ public class McpHttpServer {
 
             System.out.println("[JDT MCP] SSE connection established: " + connectionId);
 
-            // Send endpoint event with message URL
-            String messageUrl = "http://localhost:" + port + "/message?sessionId=" + connectionId;
+            // Send endpoint event with message URL (relative path like Spring Tools MCP)
+            String messageUrl = "/message?sessionId=" + connectionId;
             connection.sendEvent("endpoint", messageUrl);
 
             // Handle connection close
@@ -257,10 +312,12 @@ public class McpHttpServer {
         public synchronized void sendEvent(String event, String data) {
             if (writer != null) {
                 try {
-                    writer.write("event: " + event + "\n");
+                    // Format matching Spring Tools MCP (no spaces after colons)
+                    writer.write("id:" + id + "\n");
+                    writer.write("event:" + event + "\n");
                     // Handle multi-line data
                     for (String line : data.split("\n")) {
-                        writer.write("data: " + line + "\n");
+                        writer.write("data:" + line + "\n");
                     }
                     writer.write("\n");
                     writer.flush();

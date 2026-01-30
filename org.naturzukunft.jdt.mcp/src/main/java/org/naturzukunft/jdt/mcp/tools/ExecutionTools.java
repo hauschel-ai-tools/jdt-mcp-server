@@ -1,0 +1,782 @@
+package org.naturzukunft.jdt.mcp.tools;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.jdt.core.IClasspathEntry;
+import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.IMethod;
+import org.eclipse.jdt.core.IPackageFragment;
+import org.eclipse.jdt.core.IPackageFragmentRoot;
+import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.core.JavaCore;
+import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
+
+/**
+ * MCP tools for executing Java code.
+ */
+@SuppressWarnings("restriction")
+public class ExecutionTools {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * Detects the Maven command to use for a project.
+     * Search order:
+     * 1. Maven Wrapper in project directory (./mvnw or mvnw.cmd)
+     * 2. M2_HOME environment variable
+     * 3. MAVEN_HOME environment variable
+     * 4. SDKMAN installation (~/.sdkman/candidates/maven/current/bin/mvn)
+     * 5. Global 'mvn' command (fallback)
+     *
+     * @param projectDir the project directory
+     * @return the Maven command to use
+     */
+    private static String detectMavenCommand(File projectDir) {
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+        String mvnExecutable = isWindows ? "mvn.cmd" : "mvn";
+        String wrapperExecutable = isWindows ? "mvnw.cmd" : "mvnw";
+
+        // 1. Check for Maven Wrapper in project directory
+        File mvnw = new File(projectDir, wrapperExecutable);
+        if (mvnw.exists() && mvnw.canExecute()) {
+            System.out.println("[JDT MCP] Using Maven Wrapper: " + mvnw.getAbsolutePath());
+            return mvnw.getAbsolutePath();
+        }
+
+        // 2. Check M2_HOME environment variable
+        String m2Home = System.getenv("M2_HOME");
+        if (m2Home != null && !m2Home.isEmpty()) {
+            File m2Maven = new File(m2Home, "bin/" + mvnExecutable);
+            if (m2Maven.exists() && m2Maven.canExecute()) {
+                System.out.println("[JDT MCP] Using M2_HOME Maven: " + m2Maven.getAbsolutePath());
+                return m2Maven.getAbsolutePath();
+            }
+        }
+
+        // 3. Check MAVEN_HOME environment variable
+        String mavenHome = System.getenv("MAVEN_HOME");
+        if (mavenHome != null && !mavenHome.isEmpty()) {
+            File mavenHomeMvn = new File(mavenHome, "bin/" + mvnExecutable);
+            if (mavenHomeMvn.exists() && mavenHomeMvn.canExecute()) {
+                System.out.println("[JDT MCP] Using MAVEN_HOME Maven: " + mavenHomeMvn.getAbsolutePath());
+                return mavenHomeMvn.getAbsolutePath();
+            }
+        }
+
+        // 4. Check SDKMAN installation
+        String userHome = System.getProperty("user.home");
+        if (userHome != null) {
+            File sdkmanMaven = new File(userHome, ".sdkman/candidates/maven/current/bin/" + mvnExecutable);
+            if (sdkmanMaven.exists() && sdkmanMaven.canExecute()) {
+                System.out.println("[JDT MCP] Using SDKMAN Maven: " + sdkmanMaven.getAbsolutePath());
+                return sdkmanMaven.getAbsolutePath();
+            }
+        }
+
+        // 5. Fallback to global 'mvn' command
+        System.out.println("[JDT MCP] Using global Maven command: mvn");
+        return "mvn";
+    }
+
+    /**
+     * Tool: Run Maven build.
+     */
+    public static ToolRegistration mavenBuildTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "projectName", Map.of(
+                                "type", "string",
+                                "description", "Eclipse project name (get from jdt_list_projects)"),
+                        "goals", Map.of(
+                                "type", "string",
+                                "description", "Maven goals: 'clean' (delete target), 'compile' (build), 'test' (run tests), 'package' (create JAR), 'install' (to local repo), 'verify' (integration tests). Can combine: 'clean package'"),
+                        "profiles", Map.of(
+                                "type", "string",
+                                "description", "Maven profiles to activate (optional, comma-separated)"),
+                        "skipTests", Map.of(
+                                "type", "boolean",
+                                "description", "Skip test execution (default: false)"),
+                        "offline", Map.of(
+                                "type", "boolean",
+                                "description", "Run Maven in offline mode (default: false)"),
+                        "timeoutSeconds", Map.of(
+                                "type", "integer",
+                                "description", "Timeout in seconds (default: 300)")),
+                List.of("projectName", "goals"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_maven_build",
+                "🤖 PREFERRED over Bash for builds. Run Maven with Eclipse-aware compilation. " +
+                "WHY USE THIS: Auto-detects Maven Wrapper (./mvnw), returns structured output, " +
+                "integrates with jdt_get_compilation_errors for follow-up analysis. " +
+                "Common workflows: 'clean compile' (fresh build), 'clean package' (create JAR/WAR), " +
+                "'clean install' (build + install to local repo). " +
+                "WORKFLOW TIP: After build, use jdt_get_compilation_errors to see remaining issues.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> runMavenBuild(
+                (String) args.get("projectName"),
+                (String) args.get("goals"),
+                (String) args.get("profiles"),
+                args.get("skipTests") != null ? (Boolean) args.get("skipTests") : false,
+                args.get("offline") != null ? (Boolean) args.get("offline") : false,
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300));
+    }
+
+    private static CallToolResult runMavenBuild(String projectName, String goals, String profiles,
+            boolean skipTests, boolean offline, int timeoutSeconds) {
+        try {
+            IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+            if (project == null || !project.exists()) {
+                return new CallToolResult("Project not found: " + projectName, true);
+            }
+
+            // Build Maven command
+            List<String> command = new ArrayList<>();
+            command.add(detectMavenCommand(project.getLocation().toFile()));
+
+            // Add goals
+            for (String goal : goals.split("\\s+")) {
+                if (!goal.isEmpty()) {
+                    command.add(goal);
+                }
+            }
+
+            // Add profiles
+            if (profiles != null && !profiles.isEmpty()) {
+                command.add("-P" + profiles);
+            }
+
+            // Skip tests flag
+            if (skipTests) {
+                command.add("-DskipTests");
+            }
+
+            // Offline mode
+            if (offline) {
+                command.add("-o");
+            }
+
+            // Point to pom.xml
+            command.add("-f");
+            command.add(project.getLocation().toString() + "/pom.xml");
+
+            System.out.println("[JDT MCP] Running Maven: " + String.join(" ", command));
+
+            // Execute
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(project.getLocation().toFile());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+
+            // Read output
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("goals", goals);
+            result.put("profiles", profiles);
+            result.put("skipTests", skipTests);
+            result.put("offline", offline);
+
+            if (!finished) {
+                process.destroyForcibly();
+                result.put("status", "TIMEOUT");
+                result.put("message", "Maven build timed out after " + timeoutSeconds + " seconds");
+                result.put("output", output.toString());
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+            }
+
+            int exitCode = process.exitValue();
+            result.put("exitCode", exitCode);
+            result.put("output", output.toString());
+
+            // Parse build result from output
+            String outputStr = output.toString();
+            if (outputStr.contains("BUILD SUCCESS")) {
+                result.put("status", "SUCCESS");
+                result.put("message", "Maven build completed successfully");
+            } else if (outputStr.contains("BUILD FAILURE")) {
+                result.put("status", "FAILURE");
+                result.put("message", "Maven build failed");
+            } else {
+                result.put("status", exitCode == 0 ? "SUCCESS" : "ERROR");
+            }
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
+
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", "Error running Maven build: " + e.getMessage());
+            error.put("exceptionType", e.getClass().getSimpleName());
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception ex) {
+                return new CallToolResult("Error running Maven build: " + e.getMessage(), true);
+            }
+        }
+    }
+
+    /**
+     * Tool: Run a Java class with main method.
+     */
+    public static ToolRegistration runMainTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "className", Map.of(
+                                "type", "string",
+                                "description", "Fully qualified name of class with main(String[] args) method (e.g., 'com.example.Main'). Get from jdt_find_type."),
+                        "args", Map.of(
+                                "type", "string",
+                                "description", "Command line arguments passed to main(), space-separated (e.g., '--config prod --verbose')"),
+                        "timeoutSeconds", Map.of(
+                                "type", "integer",
+                                "description", "Max execution time before killing process (default: 30)")),
+                List.of("className"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_run_main",
+                "Execute a Java class with main() method and capture stdout/stderr. " +
+                "NOTE: Project must be compiled first (use jdt_maven_build with 'compile' goal). " +
+                "Returns exit code and all output.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> runMain(
+                (String) args.get("className"),
+                (String) args.get("args"),
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 30));
+    }
+
+    private static CallToolResult runMain(String className, String cmdArgs, int timeoutSeconds) {
+        try {
+            // Find the type and its project
+            IType type = null;
+            IJavaProject javaProject = null;
+
+            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                    .getJavaProjects()) {
+                type = project.findType(className);
+                if (type != null) {
+                    javaProject = project;
+                    break;
+                }
+            }
+
+            if (type == null || javaProject == null) {
+                return new CallToolResult("Class not found: " + className, true);
+            }
+
+            // Build classpath
+            List<String> classpathEntries = new ArrayList<>();
+            File projectDir = javaProject.getProject().getLocation().toFile();
+
+            // Add main output location (e.g., target/classes)
+            // getOutputLocation() returns workspace-relative path like /project-name/target/classes
+            org.eclipse.core.runtime.IPath outputLocation = javaProject.getOutputLocation();
+            String relativeOutput = outputLocation.removeFirstSegments(1).toString();
+            File outputDir = new File(projectDir, relativeOutput);
+            if (outputDir.exists()) {
+                classpathEntries.add(outputDir.getAbsolutePath());
+            }
+
+            // Add source folder specific output locations and library entries
+            for (IClasspathEntry entry : javaProject.getResolvedClasspath(true)) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE) {
+                    // Source folders may have custom output locations
+                    org.eclipse.core.runtime.IPath sourceOutput = entry.getOutputLocation();
+                    if (sourceOutput != null) {
+                        String relSourceOutput = sourceOutput.removeFirstSegments(1).toString();
+                        File sourceOutputDir = new File(projectDir, relSourceOutput);
+                        if (sourceOutputDir.exists() && !classpathEntries.contains(sourceOutputDir.getAbsolutePath())) {
+                            classpathEntries.add(sourceOutputDir.getAbsolutePath());
+                        }
+                    }
+                } else if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                    org.eclipse.core.runtime.IPath libPath = entry.getPath();
+                    File libFile = libPath.toFile();
+                    // Check if absolute or needs resolution
+                    if (!libFile.exists()) {
+                        // Try workspace-relative resolution
+                        libFile = new File(projectDir, libPath.removeFirstSegments(1).toString());
+                    }
+                    if (libFile.exists()) {
+                        classpathEntries.add(libFile.getAbsolutePath());
+                    }
+                }
+            }
+
+            String classpath = String.join(System.getProperty("path.separator"), classpathEntries);
+
+            // Build command
+            List<String> command = new ArrayList<>();
+            command.add("java");
+            command.add("-cp");
+            command.add(classpath.toString());
+            command.add(className);
+
+            if (cmdArgs != null && !cmdArgs.isEmpty()) {
+                for (String arg : cmdArgs.split("\\s+")) {
+                    command.add(arg);
+                }
+            }
+
+            System.out.println("[JDT MCP] Running: " + String.join(" ", command));
+
+            // Execute
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(javaProject.getProject().getLocation().toFile());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+
+            // Read output
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("className", className);
+            result.put("args", cmdArgs);
+
+            if (!finished) {
+                process.destroyForcibly();
+                result.put("status", "TIMEOUT");
+                result.put("message", "Process timed out after " + timeoutSeconds + " seconds");
+                result.put("output", output.toString());
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+            }
+
+            int exitCode = process.exitValue();
+            result.put("exitCode", exitCode);
+            result.put("output", output.toString());
+
+            if (exitCode == 0) {
+                result.put("status", "SUCCESS");
+            } else {
+                result.put("status", "ERROR");
+                result.put("message", "Process exited with code " + exitCode);
+            }
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
+
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", "Error running class: " + e.getMessage());
+            error.put("exceptionType", e.getClass().getSimpleName());
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception ex) {
+                return new CallToolResult("Error running class: " + e.getMessage(), true);
+            }
+        }
+    }
+
+    /**
+     * Tool: List unit tests.
+     */
+    public static ToolRegistration listUnitTestsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_list_unit_tests",
+                "Find all UNIT test classes in a project. Detection by naming convention: *Test.java or Test*.java " +
+                "(excluding *IT.java and *IntegrationTest.java). Returns class names, @Test methods, and file paths.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> listTests((String) args.get("projectName"), "unit"));
+    }
+
+    /**
+     * Tool: List integration tests.
+     */
+    public static ToolRegistration listIntegrationTestsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_list_integration_tests",
+                "Find all INTEGRATION test classes in a project. Detection by naming convention: *IT.java or *IntegrationTest.java " +
+                "(Maven Failsafe plugin convention). Returns class names, @Test methods, and file paths.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> listTests((String) args.get("projectName"), "integration"));
+    }
+
+    private static CallToolResult listTests(String projectName, String testType) {
+        try {
+            IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+            if (project == null || !project.exists()) {
+                return new CallToolResult("Project not found: " + projectName, true);
+            }
+
+            IJavaProject javaProject = JavaCore.create(project);
+            if (javaProject == null) {
+                return new CallToolResult("Not a Java project: " + projectName, true);
+            }
+
+            List<Map<String, Object>> tests = new ArrayList<>();
+
+            for (IPackageFragmentRoot root : javaProject.getPackageFragmentRoots()) {
+                if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                    for (IJavaElement child : root.getChildren()) {
+                        if (child instanceof IPackageFragment pkg) {
+                            for (ICompilationUnit cu : pkg.getCompilationUnits()) {
+                                String name = cu.getElementName();
+                                boolean isIntegrationTest = name.endsWith("IT.java") || name.endsWith("IntegrationTest.java");
+                                boolean isUnitTest = (name.endsWith("Test.java") || name.startsWith("Test"))
+                                        && !isIntegrationTest;
+
+                                boolean matches = testType.equals("integration") ? isIntegrationTest : isUnitTest;
+
+                                if (matches) {
+                                    for (IType type : cu.getTypes()) {
+                                        Map<String, Object> testInfo = new HashMap<>();
+                                        testInfo.put("className", type.getFullyQualifiedName());
+                                        testInfo.put("simpleName", type.getElementName());
+                                        testInfo.put("package", pkg.getElementName());
+
+                                        // Count test methods
+                                        int testMethodCount = 0;
+                                        List<String> testMethods = new ArrayList<>();
+                                        for (IMethod method : type.getMethods()) {
+                                            for (var annotation : method.getAnnotations()) {
+                                                String annotationName = annotation.getElementName();
+                                                if (annotationName.equals("Test") || annotationName.equals("org.junit.Test")
+                                                        || annotationName.equals("org.junit.jupiter.api.Test")) {
+                                                    testMethodCount++;
+                                                    testMethods.add(method.getElementName());
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        testInfo.put("testMethodCount", testMethodCount);
+                                        testInfo.put("testMethods", testMethods);
+
+                                        if (cu.getResource() != null) {
+                                            testInfo.put("file", cu.getResource().getLocation().toString());
+                                        }
+
+                                        tests.add(testInfo);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("testType", testType);
+            result.put("testCount", tests.size());
+            result.put("tests", tests);
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error listing tests: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Run unit tests.
+     */
+    public static ToolRegistration runUnitTestsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "projectName", Map.of(
+                                "type", "string",
+                                "description", "Eclipse project name (get from jdt_list_projects)"),
+                        "className", Map.of(
+                                "type", "string",
+                                "description", "Run only this test class (e.g., 'UserServiceTest'). Omit to run ALL unit tests."),
+                        "methodName", Map.of(
+                                "type", "string",
+                                "description", "Run only this test method (e.g., 'testFindById'). Requires className."),
+                        "timeoutSeconds", Map.of(
+                                "type", "integer",
+                                "description", "Max execution time (default: 120)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_run_unit_tests",
+                "🤖 PREFERRED over Bash for testing. Run unit tests with structured output. " +
+                "WHY USE THIS: Auto-detects Maven Wrapper (./mvnw), returns structured JSON with test results, " +
+                "file paths and line numbers for failures enable direct navigation. " +
+                "Specify className to run one test class, add methodName for single test method. " +
+                "WORKFLOW TIP: Use jdt_list_unit_tests first to discover available tests.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> runTests(
+                (String) args.get("projectName"),
+                (String) args.get("className"),
+                (String) args.get("methodName"),
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 120,
+                "unit"));
+    }
+
+    /**
+     * Tool: Run integration tests.
+     */
+    public static ToolRegistration runIntegrationTestsTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "projectName", Map.of(
+                                "type", "string",
+                                "description", "Eclipse project name (get from jdt_list_projects)"),
+                        "className", Map.of(
+                                "type", "string",
+                                "description", "Run only this test class (e.g., 'UserRepositoryIT'). Omit to run ALL integration tests."),
+                        "methodName", Map.of(
+                                "type", "string",
+                                "description", "Run only this test method. Requires className."),
+                        "timeoutSeconds", Map.of(
+                                "type", "integer",
+                                "description", "Max execution time (default: 300 - integration tests are slower)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_run_integration_tests",
+                "🤖 PREFERRED over Bash for integration testing. Run integration tests via 'mvn verify'. " +
+                "WHY USE THIS: Auto-detects Maven Wrapper (./mvnw), skips unit tests automatically, " +
+                "returns structured JSON with test results. " +
+                "Specify className to run one test (e.g., 'UserRepositoryIT'), add methodName for single test method. " +
+                "WORKFLOW TIP: Use jdt_list_integration_tests first to discover available tests.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> runTests(
+                (String) args.get("projectName"),
+                (String) args.get("className"),
+                (String) args.get("methodName"),
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300,
+                "integration"));
+    }
+
+    private static CallToolResult runTests(String projectName, String className, String methodName,
+            int timeoutSeconds, String testType) {
+        try {
+            IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+            if (project == null || !project.exists()) {
+                return new CallToolResult("Project not found: " + projectName, true);
+            }
+
+            // Build Maven command
+            List<String> command = new ArrayList<>();
+            command.add(detectMavenCommand(project.getLocation().toFile()));
+
+            if (testType.equals("integration")) {
+                command.add("verify");
+                command.add("-DskipTests=true"); // Skip unit tests
+                if (className != null && !className.isEmpty()) {
+                    String testSpec = className;
+                    if (methodName != null && !methodName.isEmpty()) {
+                        testSpec += "#" + methodName;
+                    }
+                    command.add("-Dit.test=" + testSpec);
+                }
+            } else {
+                command.add("test");
+                if (className != null && !className.isEmpty()) {
+                    String testSpec = className;
+                    if (methodName != null && !methodName.isEmpty()) {
+                        testSpec += "#" + methodName;
+                    }
+                    command.add("-Dtest=" + testSpec);
+                }
+            }
+
+            command.add("-f");
+            command.add(project.getLocation().toString() + "/pom.xml");
+
+            System.out.println("[JDT MCP] Running: " + String.join(" ", command));
+
+            // Execute
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.directory(project.getLocation().toFile());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+
+            // Read output
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("testType", testType);
+            result.put("className", className);
+            result.put("methodName", methodName);
+
+            if (!finished) {
+                process.destroyForcibly();
+                result.put("status", "TIMEOUT");
+                result.put("message", "Tests timed out after " + timeoutSeconds + " seconds");
+                result.put("output", output.toString());
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+            }
+
+            int exitCode = process.exitValue();
+            result.put("exitCode", exitCode);
+            result.put("output", output.toString());
+
+            // Parse test results from output for structured JSON
+            String outputStr = output.toString();
+            Map<String, Object> testSummary = parseTestSummary(outputStr);
+            result.putAll(testSummary);
+
+            if (outputStr.contains("BUILD SUCCESS")) {
+                result.put("status", "SUCCESS");
+                result.put("message", "All tests passed");
+            } else if (outputStr.contains("BUILD FAILURE")) {
+                result.put("status", "FAILURE");
+                result.put("message", "Some tests failed");
+            } else {
+                result.put("status", exitCode == 0 ? "SUCCESS" : "ERROR");
+            }
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
+
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", "Error running tests: " + e.getMessage());
+            error.put("exceptionType", e.getClass().getSimpleName());
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception ex) {
+                return new CallToolResult("Error running tests: " + e.getMessage(), true);
+            }
+        }
+    }
+
+    /**
+     * Parse Maven test output to extract structured test summary.
+     * Extracts: testsRun, failures, errors, skipped, and failedTests details.
+     */
+    private static Map<String, Object> parseTestSummary(String output) {
+        Map<String, Object> summary = new HashMap<>();
+
+        // Parse "Tests run: X, Failures: Y, Errors: Z, Skipped: W"
+        java.util.regex.Pattern summaryPattern = java.util.regex.Pattern.compile(
+            "Tests run: (\\d+), Failures: (\\d+), Errors: (\\d+), Skipped: (\\d+)");
+        java.util.regex.Matcher summaryMatcher = summaryPattern.matcher(output);
+
+        int totalTests = 0, totalFailures = 0, totalErrors = 0, totalSkipped = 0;
+        while (summaryMatcher.find()) {
+            totalTests += Integer.parseInt(summaryMatcher.group(1));
+            totalFailures += Integer.parseInt(summaryMatcher.group(2));
+            totalErrors += Integer.parseInt(summaryMatcher.group(3));
+            totalSkipped += Integer.parseInt(summaryMatcher.group(4));
+        }
+
+        if (totalTests > 0) {
+            summary.put("testsRun", totalTests);
+            summary.put("failures", totalFailures);
+            summary.put("errors", totalErrors);
+            summary.put("skipped", totalSkipped);
+            summary.put("passed", totalTests - totalFailures - totalErrors - totalSkipped);
+        }
+
+        // Parse failed tests section
+        List<Map<String, Object>> failedTests = new ArrayList<>();
+
+        // Pattern for failed test: "ClassName.methodName:lineNumber message" or "ClassName.methodName message"
+        java.util.regex.Pattern failedPattern = java.util.regex.Pattern.compile(
+            "(?:Failed tests:|Tests in error:)([\\s\\S]*?)(?=Tests run:|\\z)");
+        java.util.regex.Matcher failedMatcher = failedPattern.matcher(output);
+
+        while (failedMatcher.find()) {
+            String failedSection = failedMatcher.group(1);
+            // Parse individual failures: "  ClassName.methodName:42 Expected X but was Y"
+            java.util.regex.Pattern testPattern = java.util.regex.Pattern.compile(
+                "^\\s+([\\w.]+)\\.([\\w]+)(?::(\\d+))?(?:\\s+(.*))?$", java.util.regex.Pattern.MULTILINE);
+            java.util.regex.Matcher testMatcher = testPattern.matcher(failedSection);
+
+            while (testMatcher.find()) {
+                Map<String, Object> failedTest = new HashMap<>();
+                String fullClassName = testMatcher.group(1);
+                failedTest.put("className", fullClassName);
+                failedTest.put("methodName", testMatcher.group(2));
+                if (testMatcher.group(3) != null) {
+                    failedTest.put("line", Integer.parseInt(testMatcher.group(3)));
+                }
+                if (testMatcher.group(4) != null && !testMatcher.group(4).isEmpty()) {
+                    failedTest.put("message", testMatcher.group(4).trim());
+                }
+                failedTests.add(failedTest);
+            }
+        }
+
+        if (!failedTests.isEmpty()) {
+            summary.put("failedTests", failedTests);
+        }
+
+        return summary;
+    }
+}

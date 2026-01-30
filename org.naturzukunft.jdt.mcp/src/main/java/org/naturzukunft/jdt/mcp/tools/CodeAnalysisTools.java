@@ -57,7 +57,9 @@ public class CodeAnalysisTools {
 
         Tool tool = new Tool(
                 "jdt_parse_java_file",
-                "Parse Java source file and return structure (package, imports, types, methods, fields)",
+                "Parse a Java source file and return its structure: package name, imports, classes/interfaces, " +
+                "methods (with signatures), and fields. Use this to understand a file's content. " +
+                "TIP: Call jdt_refresh_project first if you modified the file externally.",
                 schema,
                 null);
 
@@ -158,13 +160,15 @@ public class CodeAnalysisTools {
                 "object",
                 Map.of("className", Map.of(
                         "type", "string",
-                        "description", "Fully qualified class name (e.g., java.util.ArrayList)")),
+                        "description", "Fully qualified class name = package + class name (e.g., 'java.util.ArrayList', 'com.example.MyClass'). Get from jdt_find_type or jdt_parse_java_file.")),
                 List.of("className"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_get_type_hierarchy",
-                "Get complete type hierarchy (superclasses, interfaces, subclasses) for a Java type",
+                "Get inheritance hierarchy for a Java class/interface: all superclasses, implemented interfaces, " +
+                "and subclasses/implementations. Use when you need to understand class relationships. " +
+                "For finding ONLY implementations, use jdt_find_implementations instead.",
                 schema,
                 null);
 
@@ -220,16 +224,18 @@ public class CodeAnalysisTools {
                 Map.of(
                         "elementName", Map.of(
                                 "type", "string",
-                                "description", "Fully qualified element name"),
+                                "description", "Element to search for. CLASS: 'com.example.MyClass'. METHOD: 'com.example.MyClass#methodName'. FIELD: 'com.example.MyClass#fieldName'"),
                         "elementType", Map.of(
                                 "type", "string",
-                                "description", "Element type: CLASS, METHOD, or FIELD")),
+                                "description", "Type of element: 'CLASS', 'METHOD', or 'FIELD'")),
                 List.of("elementName", "elementType"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_find_references",
-                "Find all references to a class, method, or field in the workspace",
+                "Find ALL usages of a class, method, or field across the entire workspace. " +
+                "Returns file locations and offsets. Use this for impact analysis before refactoring. " +
+                "For METHOD callers specifically, jdt_find_callers gives more detailed caller info.",
                 schema,
                 null);
 
@@ -293,6 +299,114 @@ public class CodeAnalysisTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error finding references: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Get source code of a method, class, or field.
+     */
+    public static ToolRegistration getSourceRangeTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "elementName", Map.of(
+                                "type", "string",
+                                "description", "Element to get source for. CLASS: 'com.example.MyClass'. METHOD: 'com.example.MyClass#methodName'. FIELD: 'com.example.MyClass#fieldName'"),
+                        "elementType", Map.of(
+                                "type", "string",
+                                "description", "Type of element: 'CLASS', 'METHOD', or 'FIELD'")),
+                List.of("elementName", "elementType"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_get_source_range",
+                "GET THE ACTUAL SOURCE CODE of a class, method, or field as text. " +
+                "Unlike jdt_parse_java_file which returns structure, this returns the raw code. " +
+                "Use when you need to see the implementation details or copy/modify code.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, args -> getSourceRange(
+                (String) args.get("elementName"),
+                (String) args.get("elementType")));
+    }
+
+    private static CallToolResult getSourceRange(String elementName, String elementType) {
+        try {
+            String className;
+            String memberName = null;
+
+            if (elementName.contains("#")) {
+                String[] parts = elementName.split("#", 2);
+                className = parts[0];
+                memberName = parts[1];
+            } else {
+                className = elementName;
+            }
+
+            IType type = findType(className);
+            if (type == null) {
+                return new CallToolResult("Type not found: " + className, true);
+            }
+
+            ICompilationUnit cu = type.getCompilationUnit();
+            if (cu == null) {
+                return new CallToolResult("Cannot get source for binary type: " + className, true);
+            }
+
+            String fullSource = cu.getSource();
+            String source = null;
+            int offset = 0;
+            int length = 0;
+
+            switch (elementType.toUpperCase()) {
+                case "CLASS" -> {
+                    if (type.getSourceRange() != null) {
+                        offset = type.getSourceRange().getOffset();
+                        length = type.getSourceRange().getLength();
+                        source = fullSource.substring(offset, offset + length);
+                    }
+                }
+                case "METHOD" -> {
+                    if (memberName != null) {
+                        for (IMethod method : type.getMethods()) {
+                            if (method.getElementName().equals(memberName) && method.getSourceRange() != null) {
+                                offset = method.getSourceRange().getOffset();
+                                length = method.getSourceRange().getLength();
+                                source = fullSource.substring(offset, offset + length);
+                                break;
+                            }
+                        }
+                    }
+                }
+                case "FIELD" -> {
+                    if (memberName != null) {
+                        IField field = type.getField(memberName);
+                        if (field != null && field.exists() && field.getSourceRange() != null) {
+                            offset = field.getSourceRange().getOffset();
+                            length = field.getSourceRange().getLength();
+                            source = fullSource.substring(offset, offset + length);
+                        }
+                    }
+                }
+            }
+
+            if (source == null) {
+                return new CallToolResult("Could not get source for: " + elementName, true);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("elementName", elementName);
+            result.put("elementType", elementType);
+            result.put("source", source);
+            result.put("offset", offset);
+            result.put("length", length);
+            result.put("lineCount", source.split("\n").length);
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error getting source: " + e.getMessage(), true);
         }
     }
 
