@@ -355,6 +355,18 @@
 
         <p><strong>Hinweis:</strong> Port in Eclipse-Konsole prüfen: <code>[JDT MCP] HTTP Server started on port XXXXX</code></p>
 
+        <h2>Intelligente Maven-Integration</h2>
+
+        <div class="card">
+            <h4>🚀 Automatische Erkennung</h4>
+            <ul style="margin: 0.5rem 0 0 1.5rem;">
+                <li><strong>Maven Wrapper:</strong> <code>./mvnw</code> wird automatisch bevorzugt, falls vorhanden</li>
+                <li><strong>JAVA_HOME:</strong> Wird basierend auf Projekt-Java-Version gesetzt (SDKMAN, /usr/lib/jvm)</li>
+                <li><strong>Multi-Module:</strong> <code>jdt_list_projects</code> zeigt Maven-Metadaten (groupId, artifactId, parent, modules)</li>
+                <li><strong>Strukturierter Output:</strong> Test-Ergebnisse als JSON mit <code>testsRun</code>, <code>failures</code>, <code>failedTests[]</code></li>
+            </ul>
+        </div>
+
         <h2>Verfügbare MCP Tools (44)</h2>
 
         <div class="tools-category">

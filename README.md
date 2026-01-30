@@ -12,7 +12,7 @@ Das Plugin stellt **44 MCP-Tools** in 9 Kategorien bereit:
 
 | Tool | Beschreibung |
 |------|-------------|
-| `jdt_list_projects` | **START HERE**: Alle Java-Projekte im Workspace auflisten. Gibt Projektnamen zurück, die in anderen Tools verwendet werden. |
+| `jdt_list_projects` | **START HERE**: Alle Java-Projekte im Workspace auflisten. Inkl. Maven-Metadaten (groupId, artifactId, parent, modules, hasMavenWrapper) |
 | `jdt_get_classpath` | Classpath eines Projekts abrufen (Source-Folder, Libraries, Output-Folder) |
 | `jdt_get_compilation_errors` | Kompilierungsfehler und Warnungen mit Datei, Zeile und Nachricht |
 | `jdt_get_project_structure` | Projektstruktur-Übersicht (Java-Version, Source-Folder, Packages) |
@@ -73,12 +73,20 @@ Das Plugin stellt **44 MCP-Tools** in 9 Kategorien bereit:
 
 | Tool | Beschreibung |
 |------|-------------|
-| `jdt_maven_build` | Maven-Build ausführen: clean, compile, package, install, verify |
+| `jdt_maven_build` | 🤖 **BEVORZUGT**: Maven-Build mit Auto-Detection von Maven Wrapper und Java-Version |
 | `jdt_run_main` | Java-Klasse mit main() ausführen, stdout/stderr erfassen |
 | `jdt_list_unit_tests` | Unit-Tests auflisten (*Test.java, Test*.java) |
 | `jdt_list_integration_tests` | Integration-Tests auflisten (*IT.java, *IntegrationTest.java) |
-| `jdt_run_unit_tests` | Unit-Tests via `mvn test` ausführen |
-| `jdt_run_integration_tests` | Integration-Tests via `mvn verify` ausführen |
+| `jdt_run_unit_tests` | 🤖 **BEVORZUGT**: Unit-Tests mit strukturiertem JSON-Output (testsRun, failures, failedTests) |
+| `jdt_run_integration_tests` | 🤖 **BEVORZUGT**: Integration-Tests mit strukturiertem JSON-Output |
+
+#### Intelligente Maven-Integration
+
+Die Execution-Tools erkennen automatisch:
+
+- **Maven Wrapper**: `./mvnw` wird bevorzugt, falls vorhanden
+- **JAVA_HOME**: Wird automatisch basierend auf der Projekt-Java-Version gesetzt (SDKMAN, /usr/lib/jvm)
+- **Strukturierter Output**: Test-Ergebnisse als JSON mit `testsRun`, `failures`, `errors`, `failedTests[]`
 
 ### Documentation (4 Tools)
 
