@@ -96,6 +96,102 @@ public class ExecutionTools {
     }
 
     /**
+     * Detects the JAVA_HOME for a specific Java version.
+     * Search order:
+     * 1. SDKMAN candidates (~/.sdkman/candidates/java/)
+     * 2. Common installation paths (/usr/lib/jvm/)
+     * 3. Current JAVA_HOME as fallback
+     *
+     * @param javaVersion the required Java version (e.g., "21", "25")
+     * @return the JAVA_HOME path or null if not found
+     */
+    private static String detectJavaHome(String javaVersion) {
+        if (javaVersion == null || javaVersion.isEmpty()) {
+            return null;
+        }
+
+        String userHome = System.getProperty("user.home");
+
+        // 1. Check SDKMAN candidates
+        if (userHome != null) {
+            File sdkmanJava = new File(userHome, ".sdkman/candidates/java");
+            if (sdkmanJava.exists() && sdkmanJava.isDirectory()) {
+                File[] candidates = sdkmanJava.listFiles();
+                if (candidates != null) {
+                    // Look for exact version match first (e.g., "25.0.1-open")
+                    for (File candidate : candidates) {
+                        if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + ".")) {
+                            File javaExe = new File(candidate, "bin/java");
+                            if (javaExe.exists()) {
+                                System.out.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                return candidate.getAbsolutePath();
+                            }
+                        }
+                    }
+                    // Look for major version match (e.g., "25-open", "25-graal")
+                    for (File candidate : candidates) {
+                        if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + "-")) {
+                            File javaExe = new File(candidate, "bin/java");
+                            if (javaExe.exists()) {
+                                System.out.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                return candidate.getAbsolutePath();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Check common Linux installation paths
+        File usrLibJvm = new File("/usr/lib/jvm");
+        if (usrLibJvm.exists() && usrLibJvm.isDirectory()) {
+            File[] jvms = usrLibJvm.listFiles();
+            if (jvms != null) {
+                for (File jvm : jvms) {
+                    if (jvm.isDirectory() &&
+                        (jvm.getName().contains("java-" + javaVersion) ||
+                         jvm.getName().contains("jdk-" + javaVersion))) {
+                        File javaExe = new File(jvm, "bin/java");
+                        if (javaExe.exists()) {
+                            System.out.println("[JDT MCP] Using system Java " + javaVersion + ": " + jvm.getAbsolutePath());
+                            return jvm.getAbsolutePath();
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. No specific version found
+        System.out.println("[JDT MCP] Java " + javaVersion + " not found, using system default");
+        return null;
+    }
+
+    /**
+     * Configures the ProcessBuilder environment with the correct JAVA_HOME for the project.
+     *
+     * @param pb the ProcessBuilder to configure
+     * @param project the Eclipse project
+     */
+    private static void configureJavaEnvironment(ProcessBuilder pb, IProject project) {
+        try {
+            IJavaProject javaProject = JavaCore.create(project);
+            if (javaProject != null && javaProject.exists()) {
+                String javaVersion = javaProject.getOption(JavaCore.COMPILER_SOURCE, true);
+                if (javaVersion != null) {
+                    String javaHome = detectJavaHome(javaVersion);
+                    if (javaHome != null) {
+                        Map<String, String> env = pb.environment();
+                        env.put("JAVA_HOME", javaHome);
+                        System.out.println("[JDT MCP] Set JAVA_HOME=" + javaHome + " for project Java " + javaVersion);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[JDT MCP] Could not configure Java environment: " + e.getMessage());
+        }
+    }
+
+    /**
      * Tool: Run Maven build.
      */
     public static ToolRegistration mavenBuildTool() {
@@ -187,6 +283,9 @@ public class ExecutionTools {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(project.getLocation().toFile());
             pb.redirectErrorStream(true);
+
+            // Configure JAVA_HOME based on project's Java version
+            configureJavaEnvironment(pb, project);
 
             Process process = pb.start();
 
@@ -653,6 +752,9 @@ public class ExecutionTools {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(project.getLocation().toFile());
             pb.redirectErrorStream(true);
+
+            // Configure JAVA_HOME based on project's Java version
+            configureJavaEnvironment(pb, project);
 
             Process process = pb.start();
 
