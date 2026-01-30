@@ -755,15 +755,21 @@ public class ExecutionTools {
             final List<Map<String, Object>> testResults = new ArrayList<>();
             final int[] counts = new int[4]; // [total, passed, failed, errors]
             final CountDownLatch latch = new CountDownLatch(1);
-            final StringBuilder errorOutput = new StringBuilder();
 
             TestRunListener listener = new TestRunListener() {
                 @Override
                 public void sessionFinished(ITestRunSession session) {
-                    counts[0] = session.getStartedCount();
-                    counts[1] = session.getStartedCount() - session.getFailureCount() - session.getErrorCount();
-                    counts[2] = session.getFailureCount();
-                    counts[3] = session.getErrorCount();
+                    // Calculate counts from collected results
+                    counts[0] = testResults.size(); // total
+                    counts[1] = (int) testResults.stream()
+                            .filter(r -> "OK".equals(r.get("status")))
+                            .count(); // passed
+                    counts[2] = (int) testResults.stream()
+                            .filter(r -> "FAILURE".equals(r.get("status")))
+                            .count(); // failures
+                    counts[3] = (int) testResults.stream()
+                            .filter(r -> "ERROR".equals(r.get("status")))
+                            .count(); // errors
                     latch.countDown();
                 }
 
