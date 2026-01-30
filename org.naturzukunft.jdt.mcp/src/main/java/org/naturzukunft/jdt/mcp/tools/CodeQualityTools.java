@@ -34,6 +34,7 @@ import org.eclipse.jdt.core.search.SearchPattern;
 import org.eclipse.jdt.core.search.SearchRequestor;
 import org.eclipse.jdt.ui.text.java.IInvocationContext;
 import org.eclipse.jdt.ui.text.java.IJavaCompletionProposal;
+import org.eclipse.swt.widgets.Display;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -222,7 +223,19 @@ public class CodeQualityTools {
 
             // Apply the fix using CUCorrectionProposal
             if (selectedFix instanceof org.eclipse.jdt.ui.text.java.correction.CUCorrectionProposal cuProposal) {
-                cuProposal.apply(null); // null document means use internal
+                // Must run on UI thread to avoid "Invalid thread access" error
+                final Exception[] uiException = new Exception[1];
+                Display display = Display.getDefault();
+                display.syncExec(() -> {
+                    try {
+                        cuProposal.apply(null); // null document means use internal
+                    } catch (Exception e) {
+                        uiException[0] = e;
+                    }
+                });
+                if (uiException[0] != null) {
+                    throw uiException[0];
+                }
                 result.put("status", "SUCCESS");
                 result.put("message", "Fix applied: " + fixDescription);
             } else {

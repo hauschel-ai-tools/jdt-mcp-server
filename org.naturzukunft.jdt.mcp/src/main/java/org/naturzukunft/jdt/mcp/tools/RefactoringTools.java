@@ -515,15 +515,35 @@ public class RefactoringTools {
             parser.setResolveBindings(true);
             CompilationUnit ast = (CompilationUnit) parser.createAST(new NullProgressMonitor());
 
-            // Collect used types from AST
+            // Collect used types and static members from AST
             java.util.Set<String> usedTypes = new java.util.HashSet<>();
+            java.util.Set<String> usedStaticMembers = new java.util.HashSet<>();
             ast.accept(new org.eclipse.jdt.core.dom.ASTVisitor() {
                 @Override
                 public boolean visit(org.eclipse.jdt.core.dom.SimpleName node) {
-                    if (node.resolveBinding() instanceof org.eclipse.jdt.core.dom.ITypeBinding binding) {
-                        String qualifiedName = binding.getQualifiedName();
+                    org.eclipse.jdt.core.dom.IBinding binding = node.resolveBinding();
+                    if (binding instanceof org.eclipse.jdt.core.dom.ITypeBinding typeBinding) {
+                        String qualifiedName = typeBinding.getQualifiedName();
                         if (qualifiedName != null && !qualifiedName.isEmpty() && qualifiedName.contains(".")) {
                             usedTypes.add(qualifiedName);
+                        }
+                    } else if (binding instanceof org.eclipse.jdt.core.dom.IMethodBinding methodBinding) {
+                        // Track static method imports (e.g., assertThat from AssertJ)
+                        if ((methodBinding.getModifiers() & org.eclipse.jdt.core.dom.Modifier.STATIC) != 0) {
+                            org.eclipse.jdt.core.dom.ITypeBinding declaringClass = methodBinding.getDeclaringClass();
+                            if (declaringClass != null) {
+                                String staticImport = declaringClass.getQualifiedName() + "." + methodBinding.getName();
+                                usedStaticMembers.add(staticImport);
+                            }
+                        }
+                    } else if (binding instanceof org.eclipse.jdt.core.dom.IVariableBinding variableBinding) {
+                        // Track static field imports (e.g., constants)
+                        if ((variableBinding.getModifiers() & org.eclipse.jdt.core.dom.Modifier.STATIC) != 0) {
+                            org.eclipse.jdt.core.dom.ITypeBinding declaringClass = variableBinding.getDeclaringClass();
+                            if (declaringClass != null) {
+                                String staticImport = declaringClass.getQualifiedName() + "." + variableBinding.getName();
+                                usedStaticMembers.add(staticImport);
+                            }
                         }
                     }
                     return true;
@@ -547,17 +567,32 @@ public class RefactoringTools {
                 for (IImportDeclaration imp : cu.getImports()) {
                     String importName = imp.getElementName();
                     boolean isUsed = false;
+                    boolean isStatic = org.eclipse.jdt.core.Flags.isStatic(imp.getFlags());
 
                     if (imp.isOnDemand()) {
-                        // Star imports - check if any type from that package is used
+                        // Star imports - check if any type/member from that package is used
                         String packagePrefix = importName.substring(0, importName.length() - 1); // Remove *
-                        for (String usedType : usedTypes) {
-                            if (usedType.startsWith(packagePrefix)) {
-                                isUsed = true;
-                                break;
+                        if (isStatic) {
+                            // Static star import (e.g., import static org.assertj.core.api.Assertions.*)
+                            for (String usedMember : usedStaticMembers) {
+                                if (usedMember.startsWith(packagePrefix)) {
+                                    isUsed = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            for (String usedType : usedTypes) {
+                                if (usedType.startsWith(packagePrefix)) {
+                                    isUsed = true;
+                                    break;
+                                }
                             }
                         }
+                    } else if (isStatic) {
+                        // Static import (e.g., import static org.assertj.core.api.Assertions.assertThat)
+                        isUsed = usedStaticMembers.contains(importName);
                     } else {
+                        // Regular type import
                         isUsed = usedTypes.contains(importName);
                     }
 
