@@ -7,10 +7,19 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
+import org.eclipse.debug.core.DebugPlugin;
+import org.eclipse.debug.core.ILaunch;
+import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.ILaunchConfigurationType;
+import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
+import org.eclipse.debug.core.ILaunchManager;
+import org.eclipse.debug.core.model.IProcess;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
@@ -20,6 +29,12 @@ import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.junit.JUnitCore;
+import org.eclipse.jdt.junit.TestRunListener;
+import org.eclipse.jdt.junit.model.ITestCaseElement;
+import org.eclipse.jdt.junit.model.ITestElement;
+import org.eclipse.jdt.junit.model.ITestRunSession;
+import org.eclipse.jdt.launching.IJavaLaunchConfigurationConstants;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -511,50 +526,34 @@ public class ExecutionTools {
     }
 
     /**
-     * Tool: List unit tests.
+     * Tool: List tests in a project.
      */
-    public static ToolRegistration listUnitTestsTool() {
+    public static ToolRegistration listTestsTool() {
         JsonSchema schema = new JsonSchema(
                 "object",
-                Map.of("projectName", Map.of(
-                        "type", "string",
-                        "description", "Eclipse project name (get from jdt_list_projects)")),
+                Map.of(
+                        "projectName", Map.of(
+                                "type", "string",
+                                "description", "Eclipse project name (get from jdt_list_projects)"),
+                        "pattern", Map.of(
+                                "type", "string",
+                                "description", "Optional filter pattern: 'unit' (*Test.java), 'integration' (*IT.java), or custom glob pattern. Omit to list all tests.")),
                 List.of("projectName"),
                 null, null, null);
 
         Tool tool = new Tool(
-                "jdt_list_unit_tests",
-                "Find all UNIT test classes in a project. Detection by naming convention: *Test.java or Test*.java " +
-                "(excluding *IT.java and *IntegrationTest.java). Returns class names, @Test methods, and file paths.",
+                "jdt_list_tests",
+                "Find all test classes in a project. Returns class names, @Test methods, and file paths. " +
+                "Use pattern='unit' for *Test.java, pattern='integration' for *IT.java, or omit for all tests.",
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> listTests((String) args.get("projectName"), "unit"));
+        return new ToolRegistration(tool, args -> listTests(
+                (String) args.get("projectName"),
+                (String) args.get("pattern")));
     }
 
-    /**
-     * Tool: List integration tests.
-     */
-    public static ToolRegistration listIntegrationTestsTool() {
-        JsonSchema schema = new JsonSchema(
-                "object",
-                Map.of("projectName", Map.of(
-                        "type", "string",
-                        "description", "Eclipse project name (get from jdt_list_projects)")),
-                List.of("projectName"),
-                null, null, null);
-
-        Tool tool = new Tool(
-                "jdt_list_integration_tests",
-                "Find all INTEGRATION test classes in a project. Detection by naming convention: *IT.java or *IntegrationTest.java " +
-                "(Maven Failsafe plugin convention). Returns class names, @Test methods, and file paths.",
-                schema,
-                null);
-
-        return new ToolRegistration(tool, args -> listTests((String) args.get("projectName"), "integration"));
-    }
-
-    private static CallToolResult listTests(String projectName, String testType) {
+    private static CallToolResult listTests(String projectName, String pattern) {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
@@ -574,18 +573,35 @@ public class ExecutionTools {
                         if (child instanceof IPackageFragment pkg) {
                             for (ICompilationUnit cu : pkg.getCompilationUnits()) {
                                 String name = cu.getElementName();
-                                boolean isIntegrationTest = name.endsWith("IT.java") || name.endsWith("IntegrationTest.java");
-                                boolean isUnitTest = (name.endsWith("Test.java") || name.startsWith("Test"))
-                                        && !isIntegrationTest;
 
-                                boolean matches = testType.equals("integration") ? isIntegrationTest : isUnitTest;
+                                // Check if this is a test class based on pattern
+                                boolean isTest = false;
+                                String testType = null;
 
-                                if (matches) {
+                                if (name.endsWith("IT.java") || name.endsWith("IntegrationTest.java")) {
+                                    isTest = true;
+                                    testType = "integration";
+                                } else if (name.endsWith("Test.java") || name.startsWith("Test")) {
+                                    isTest = true;
+                                    testType = "unit";
+                                }
+
+                                // Apply filter
+                                if (pattern != null && !pattern.isEmpty()) {
+                                    if (pattern.equals("unit") && !"unit".equals(testType)) {
+                                        isTest = false;
+                                    } else if (pattern.equals("integration") && !"integration".equals(testType)) {
+                                        isTest = false;
+                                    }
+                                }
+
+                                if (isTest) {
                                     for (IType type : cu.getTypes()) {
                                         Map<String, Object> testInfo = new HashMap<>();
                                         testInfo.put("className", type.getFullyQualifiedName());
                                         testInfo.put("simpleName", type.getElementName());
                                         testInfo.put("package", pkg.getElementName());
+                                        testInfo.put("testType", testType);
 
                                         // Count test methods
                                         int testMethodCount = 0;
@@ -619,7 +635,7 @@ public class ExecutionTools {
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
-            result.put("testType", testType);
+            result.put("pattern", pattern);
             result.put("testCount", tests.size());
             result.put("tests", tests);
 
@@ -631,9 +647,9 @@ public class ExecutionTools {
     }
 
     /**
-     * Tool: Run unit tests.
+     * Tool: Run tests using Eclipse JUnit Runner.
      */
-    public static ToolRegistration runUnitTestsTool() {
+    public static ToolRegistration runTestsTool() {
         JsonSchema schema = new JsonSchema(
                 "object",
                 Map.of(
@@ -642,167 +658,199 @@ public class ExecutionTools {
                                 "description", "Eclipse project name (get from jdt_list_projects)"),
                         "className", Map.of(
                                 "type", "string",
-                                "description", "Run only this test class (e.g., 'UserServiceTest'). Omit to run ALL unit tests."),
+                                "description", "Test class to run (simple name like 'UserServiceTest' or fully qualified). Required."),
                         "methodName", Map.of(
                                 "type", "string",
-                                "description", "Run only this test method (e.g., 'testFindById'). Requires className."),
+                                "description", "Run only this test method (e.g., 'testFindById'). Omit to run all tests in class."),
                         "timeoutSeconds", Map.of(
                                 "type", "integer",
                                 "description", "Max execution time (default: 120)")),
-                List.of("projectName"),
+                List.of("projectName", "className"),
                 null, null, null);
 
         Tool tool = new Tool(
-                "jdt_run_unit_tests",
-                "🤖 PREFERRED over Bash for testing. Run unit tests with structured output. " +
-                "WHY USE THIS: Auto-detects Maven Wrapper (./mvnw), returns structured JSON with test results, " +
-                "file paths and line numbers for failures enable direct navigation. " +
-                "Specify className to run one test class, add methodName for single test method. " +
-                "WORKFLOW TIP: Use jdt_list_unit_tests first to discover available tests.",
+                "jdt_run_tests",
+                "🤖 PREFERRED over Bash for testing. Run tests using Eclipse's JUnit runner. " +
+                "WHY USE THIS: Uses project's Java version automatically, no Maven configuration needed, " +
+                "returns structured JSON with test results including failures with file paths and line numbers. " +
+                "Works for both unit tests (*Test) and integration tests (*IT) - no distinction needed. " +
+                "WORKFLOW TIP: Use jdt_list_tests first to discover available tests.",
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> runTests(
+        return new ToolRegistration(tool, args -> runTestsWithJUnit(
                 (String) args.get("projectName"),
                 (String) args.get("className"),
                 (String) args.get("methodName"),
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 120,
-                "unit"));
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 120));
     }
 
-    /**
-     * Tool: Run integration tests.
-     */
-    public static ToolRegistration runIntegrationTestsTool() {
-        JsonSchema schema = new JsonSchema(
-                "object",
-                Map.of(
-                        "projectName", Map.of(
-                                "type", "string",
-                                "description", "Eclipse project name (get from jdt_list_projects)"),
-                        "className", Map.of(
-                                "type", "string",
-                                "description", "Run only this test class (e.g., 'UserRepositoryIT'). Omit to run ALL integration tests."),
-                        "methodName", Map.of(
-                                "type", "string",
-                                "description", "Run only this test method. Requires className."),
-                        "timeoutSeconds", Map.of(
-                                "type", "integer",
-                                "description", "Max execution time (default: 300 - integration tests are slower)")),
-                List.of("projectName"),
-                null, null, null);
-
-        Tool tool = new Tool(
-                "jdt_run_integration_tests",
-                "🤖 PREFERRED over Bash for integration testing. Run integration tests via 'mvn verify'. " +
-                "WHY USE THIS: Auto-detects Maven Wrapper (./mvnw), skips unit tests automatically, " +
-                "returns structured JSON with test results. " +
-                "Specify className to run one test (e.g., 'UserRepositoryIT'), add methodName for single test method. " +
-                "WORKFLOW TIP: Use jdt_list_integration_tests first to discover available tests.",
-                schema,
-                null);
-
-        return new ToolRegistration(tool, args -> runTests(
-                (String) args.get("projectName"),
-                (String) args.get("className"),
-                (String) args.get("methodName"),
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300,
-                "integration"));
-    }
-
-    private static CallToolResult runTests(String projectName, String className, String methodName,
-            int timeoutSeconds, String testType) {
+    private static CallToolResult runTestsWithJUnit(String projectName, String className, String methodName, int timeoutSeconds) {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
                 return new CallToolResult("Project not found: " + projectName, true);
             }
 
-            // Build Maven command
-            List<String> command = new ArrayList<>();
-            command.add(detectMavenCommand(project.getLocation().toFile()));
+            IJavaProject javaProject = JavaCore.create(project);
+            if (javaProject == null) {
+                return new CallToolResult("Not a Java project: " + projectName, true);
+            }
 
-            if (testType.equals("integration")) {
-                command.add("verify");
-                command.add("-DskipTests=true"); // Skip unit tests
-                if (className != null && !className.isEmpty()) {
-                    String testSpec = className;
-                    if (methodName != null && !methodName.isEmpty()) {
-                        testSpec += "#" + methodName;
+            // Find the test type
+            IType testType = null;
+
+            // Try as fully qualified name first
+            testType = javaProject.findType(className);
+
+            // If not found, search by simple name
+            if (testType == null) {
+                for (IPackageFragmentRoot root : javaProject.getPackageFragmentRoots()) {
+                    if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                        for (IJavaElement child : root.getChildren()) {
+                            if (child instanceof IPackageFragment pkg) {
+                                for (ICompilationUnit cu : pkg.getCompilationUnits()) {
+                                    for (IType type : cu.getTypes()) {
+                                        if (type.getElementName().equals(className)) {
+                                            testType = type;
+                                            break;
+                                        }
+                                    }
+                                    if (testType != null) break;
+                                }
+                                if (testType != null) break;
+                            }
+                        }
+                        if (testType != null) break;
                     }
-                    command.add("-Dit.test=" + testSpec);
                 }
-            } else {
-                command.add("test");
-                if (className != null && !className.isEmpty()) {
-                    String testSpec = className;
-                    if (methodName != null && !methodName.isEmpty()) {
-                        testSpec += "#" + methodName;
+            }
+
+            if (testType == null) {
+                return new CallToolResult("Test class not found: " + className, true);
+            }
+
+            String fullyQualifiedName = testType.getFullyQualifiedName();
+
+            // Create JUnit launch configuration
+            ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
+            ILaunchConfigurationType junitType = launchManager.getLaunchConfigurationType(
+                    "org.eclipse.jdt.junit.launchconfig");
+
+            if (junitType == null) {
+                return new CallToolResult("JUnit launch configuration type not found. Is JUnit plugin installed?", true);
+            }
+
+            String configName = "MCP-Test-" + testType.getElementName() + "-" + System.currentTimeMillis();
+            ILaunchConfigurationWorkingCopy workingCopy = junitType.newInstance(null, configName);
+
+            // Configure the launch
+            workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, projectName);
+            workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, fullyQualifiedName);
+            workingCopy.setAttribute("org.eclipse.jdt.junit.CONTAINER", "");
+            workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", methodName != null ? methodName : "");
+            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", "org.eclipse.jdt.junit.loader.junit5");
+
+            // Set up result collection
+            final List<Map<String, Object>> testResults = new ArrayList<>();
+            final int[] counts = new int[4]; // [total, passed, failed, errors]
+            final CountDownLatch latch = new CountDownLatch(1);
+            final StringBuilder errorOutput = new StringBuilder();
+
+            TestRunListener listener = new TestRunListener() {
+                @Override
+                public void sessionFinished(ITestRunSession session) {
+                    counts[0] = session.getStartedCount();
+                    counts[1] = session.getStartedCount() - session.getFailureCount() - session.getErrorCount();
+                    counts[2] = session.getFailureCount();
+                    counts[3] = session.getErrorCount();
+                    latch.countDown();
+                }
+
+                @Override
+                public void testCaseFinished(ITestCaseElement testCaseElement) {
+                    Map<String, Object> testResult = new HashMap<>();
+                    testResult.put("className", testCaseElement.getTestClassName());
+                    testResult.put("methodName", testCaseElement.getTestMethodName());
+
+                    ITestElement.Result result = testCaseElement.getTestResult(false);
+                    testResult.put("status", result.toString());
+
+                    if (result == ITestElement.Result.FAILURE || result == ITestElement.Result.ERROR) {
+                        String trace = testCaseElement.getFailureTrace() != null ?
+                                testCaseElement.getFailureTrace().getTrace() : null;
+                        if (trace != null) {
+                            testResult.put("failureTrace", trace);
+                            // Extract line number from stack trace
+                            java.util.regex.Pattern linePattern = java.util.regex.Pattern.compile(
+                                    testCaseElement.getTestClassName().replace(".", "\\.") +
+                                    "\\." + testCaseElement.getTestMethodName() + "\\(.*:(\\d+)\\)");
+                            java.util.regex.Matcher matcher = linePattern.matcher(trace);
+                            if (matcher.find()) {
+                                testResult.put("line", Integer.parseInt(matcher.group(1)));
+                            }
+                        }
                     }
-                    command.add("-Dtest=" + testSpec);
+
+                    testResult.put("duration", testCaseElement.getElapsedTimeInSeconds());
+                    testResults.add(testResult);
                 }
-            }
+            };
 
-            command.add("-f");
-            command.add(project.getLocation().toString() + "/pom.xml");
+            JUnitCore.addTestRunListener(listener);
 
-            System.out.println("[JDT MCP] Running: " + String.join(" ", command));
+            try {
+                // Launch the tests
+                ILaunchConfiguration config = workingCopy.doSave();
+                ILaunch launch = config.launch(ILaunchManager.RUN_MODE, null, false);
 
-            // Execute
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.directory(project.getLocation().toFile());
-            pb.redirectErrorStream(true);
+                // Wait for completion with timeout
+                boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
 
-            // Configure JAVA_HOME based on project's Java version
-            configureJavaEnvironment(pb, project);
-
-            Process process = pb.start();
-
-            // Read output
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
+                // Clean up
+                if (!completed) {
+                    // Terminate if still running
+                    for (IProcess process : launch.getProcesses()) {
+                        if (!process.isTerminated()) {
+                            process.terminate();
+                        }
+                    }
                 }
+
+                // Delete temporary launch config
+                config.delete();
+
+                // Build result
+                Map<String, Object> result = new HashMap<>();
+                result.put("projectName", projectName);
+                result.put("className", fullyQualifiedName);
+                result.put("methodName", methodName);
+
+                if (!completed) {
+                    result.put("status", "TIMEOUT");
+                    result.put("message", "Tests timed out after " + timeoutSeconds + " seconds");
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
+
+                result.put("testsRun", counts[0]);
+                result.put("passed", counts[1]);
+                result.put("failures", counts[2]);
+                result.put("errors", counts[3]);
+                result.put("testResults", testResults);
+
+                if (counts[2] == 0 && counts[3] == 0) {
+                    result.put("status", "SUCCESS");
+                    result.put("message", "All " + counts[0] + " tests passed");
+                } else {
+                    result.put("status", "FAILURE");
+                    result.put("message", counts[2] + " failures, " + counts[3] + " errors out of " + counts[0] + " tests");
+                }
+
+                return new CallToolResult(MAPPER.writeValueAsString(result), counts[2] > 0 || counts[3] > 0);
+
+            } finally {
+                JUnitCore.removeTestRunListener(listener);
             }
-
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("projectName", projectName);
-            result.put("testType", testType);
-            result.put("className", className);
-            result.put("methodName", methodName);
-
-            if (!finished) {
-                process.destroyForcibly();
-                result.put("status", "TIMEOUT");
-                result.put("message", "Tests timed out after " + timeoutSeconds + " seconds");
-                result.put("output", output.toString());
-                return new CallToolResult(MAPPER.writeValueAsString(result), true);
-            }
-
-            int exitCode = process.exitValue();
-            result.put("exitCode", exitCode);
-            result.put("output", output.toString());
-
-            // Parse test results from output for structured JSON
-            String outputStr = output.toString();
-            Map<String, Object> testSummary = parseTestSummary(outputStr);
-            result.putAll(testSummary);
-
-            if (outputStr.contains("BUILD SUCCESS")) {
-                result.put("status", "SUCCESS");
-                result.put("message", "All tests passed");
-            } else if (outputStr.contains("BUILD FAILURE")) {
-                result.put("status", "FAILURE");
-                result.put("message", "Some tests failed");
-            } else {
-                result.put("status", exitCode == 0 ? "SUCCESS" : "ERROR");
-            }
-
-            return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
 
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
@@ -815,70 +863,5 @@ public class ExecutionTools {
                 return new CallToolResult("Error running tests: " + e.getMessage(), true);
             }
         }
-    }
-
-    /**
-     * Parse Maven test output to extract structured test summary.
-     * Extracts: testsRun, failures, errors, skipped, and failedTests details.
-     */
-    private static Map<String, Object> parseTestSummary(String output) {
-        Map<String, Object> summary = new HashMap<>();
-
-        // Parse "Tests run: X, Failures: Y, Errors: Z, Skipped: W"
-        java.util.regex.Pattern summaryPattern = java.util.regex.Pattern.compile(
-            "Tests run: (\\d+), Failures: (\\d+), Errors: (\\d+), Skipped: (\\d+)");
-        java.util.regex.Matcher summaryMatcher = summaryPattern.matcher(output);
-
-        int totalTests = 0, totalFailures = 0, totalErrors = 0, totalSkipped = 0;
-        while (summaryMatcher.find()) {
-            totalTests += Integer.parseInt(summaryMatcher.group(1));
-            totalFailures += Integer.parseInt(summaryMatcher.group(2));
-            totalErrors += Integer.parseInt(summaryMatcher.group(3));
-            totalSkipped += Integer.parseInt(summaryMatcher.group(4));
-        }
-
-        if (totalTests > 0) {
-            summary.put("testsRun", totalTests);
-            summary.put("failures", totalFailures);
-            summary.put("errors", totalErrors);
-            summary.put("skipped", totalSkipped);
-            summary.put("passed", totalTests - totalFailures - totalErrors - totalSkipped);
-        }
-
-        // Parse failed tests section
-        List<Map<String, Object>> failedTests = new ArrayList<>();
-
-        // Pattern for failed test: "ClassName.methodName:lineNumber message" or "ClassName.methodName message"
-        java.util.regex.Pattern failedPattern = java.util.regex.Pattern.compile(
-            "(?:Failed tests:|Tests in error:)([\\s\\S]*?)(?=Tests run:|\\z)");
-        java.util.regex.Matcher failedMatcher = failedPattern.matcher(output);
-
-        while (failedMatcher.find()) {
-            String failedSection = failedMatcher.group(1);
-            // Parse individual failures: "  ClassName.methodName:42 Expected X but was Y"
-            java.util.regex.Pattern testPattern = java.util.regex.Pattern.compile(
-                "^\\s+([\\w.]+)\\.([\\w]+)(?::(\\d+))?(?:\\s+(.*))?$", java.util.regex.Pattern.MULTILINE);
-            java.util.regex.Matcher testMatcher = testPattern.matcher(failedSection);
-
-            while (testMatcher.find()) {
-                Map<String, Object> failedTest = new HashMap<>();
-                String fullClassName = testMatcher.group(1);
-                failedTest.put("className", fullClassName);
-                failedTest.put("methodName", testMatcher.group(2));
-                if (testMatcher.group(3) != null) {
-                    failedTest.put("line", Integer.parseInt(testMatcher.group(3)));
-                }
-                if (testMatcher.group(4) != null && !testMatcher.group(4).isEmpty()) {
-                    failedTest.put("message", testMatcher.group(4).trim());
-                }
-                failedTests.add(failedTest);
-            }
-        }
-
-        if (!failedTests.isEmpty()) {
-            summary.put("failedTests", failedTests);
-        }
-
-        return summary;
     }
 }

@@ -107,10 +107,8 @@ public class McpServerManager {
                 // Execution Tools
                 ExecutionTools.mavenBuildTool(),
                 ExecutionTools.runMainTool(),
-                ExecutionTools.listUnitTestsTool(),
-                ExecutionTools.listIntegrationTestsTool(),
-                ExecutionTools.runUnitTestsTool(),
-                ExecutionTools.runIntegrationTestsTool(),
+                ExecutionTools.listTestsTool(),
+                ExecutionTools.runTestsTool(),
 
                 // Documentation Tools
                 DocumentationTools.getJavadocTool(),
