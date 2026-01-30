@@ -82,6 +82,10 @@ public class McpServerManager {
                 CreationTools.createEnumTool(),
 
                 // Code Generation Tools
+                CodeGenerationTools.addMethodTool(),
+                CodeGenerationTools.addFieldTool(),
+                CodeGenerationTools.addImportTool(),
+                CodeGenerationTools.implementInterfaceTool(),
                 CodeGenerationTools.generateGettersSettersTool(),
                 CodeGenerationTools.generateConstructorTool(),
                 CodeGenerationTools.generateEqualsHashCodeTool(),
