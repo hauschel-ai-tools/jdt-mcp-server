@@ -751,6 +751,16 @@ public class ExecutionTools {
 
             String fullyQualifiedName = testType.getFullyQualifiedName();
 
+            // Check for Spring Boot integration test annotations and warn
+            boolean isIntegrationTest = detectIntegrationTest(testType);
+            String integrationTestWarning = null;
+            if (isIntegrationTest) {
+                integrationTestWarning = "WARNING: This appears to be a Spring Boot integration test (@SpringBootTest or similar). " +
+                    "Integration tests may require Spring ApplicationContext, Testcontainers, or external resources. " +
+                    "If tests fail silently or timeout, consider using Maven Failsafe: " +
+                    "./mvnw failsafe:integration-test -Dit.test=" + testType.getElementName();
+            }
+
             // Create JUnit launch configuration
             ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
             ILaunchConfigurationType junitType = launchManager.getLaunchConfigurationType(
@@ -773,55 +783,79 @@ public class ExecutionTools {
                 workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", methodName);
             }
 
-            // Set up result collection
+            // Set up result collection with diagnostic state
             final List<Map<String, Object>> testResults = new ArrayList<>();
             final int[] counts = new int[4]; // [total, passed, failed, errors]
             final CountDownLatch latch = new CountDownLatch(1);
+            final boolean[] sessionState = new boolean[3]; // [sessionStarted, sessionFinished, hasError]
+            final String[] errorMessage = new String[1];
 
             TestRunListener listener = new TestRunListener() {
                 @Override
+                public void sessionStarted(ITestRunSession session) {
+                    try {
+                        sessionState[0] = true; // sessionStarted
+                    } catch (Exception e) {
+                        sessionState[2] = true; // hasError
+                        errorMessage[0] = "Error in sessionStarted: " + e.getMessage();
+                    }
+                }
+
+                @Override
                 public void sessionFinished(ITestRunSession session) {
-                    // Calculate counts from collected results
-                    counts[0] = testResults.size(); // total
-                    counts[1] = (int) testResults.stream()
-                            .filter(r -> "OK".equals(r.get("status")))
-                            .count(); // passed
-                    counts[2] = (int) testResults.stream()
-                            .filter(r -> "FAILURE".equals(r.get("status")))
-                            .count(); // failures
-                    counts[3] = (int) testResults.stream()
-                            .filter(r -> "ERROR".equals(r.get("status")))
-                            .count(); // errors
-                    latch.countDown();
+                    try {
+                        sessionState[1] = true; // sessionFinished
+                        // Calculate counts from collected results
+                        counts[0] = testResults.size(); // total
+                        counts[1] = (int) testResults.stream()
+                                .filter(r -> "OK".equals(r.get("status")))
+                                .count(); // passed
+                        counts[2] = (int) testResults.stream()
+                                .filter(r -> "FAILURE".equals(r.get("status")))
+                                .count(); // failures
+                        counts[3] = (int) testResults.stream()
+                                .filter(r -> "ERROR".equals(r.get("status")))
+                                .count(); // errors
+                    } catch (Exception e) {
+                        sessionState[2] = true; // hasError
+                        errorMessage[0] = "Error in sessionFinished: " + e.getMessage();
+                    } finally {
+                        latch.countDown();
+                    }
                 }
 
                 @Override
                 public void testCaseFinished(ITestCaseElement testCaseElement) {
-                    Map<String, Object> testResult = new HashMap<>();
-                    testResult.put("className", testCaseElement.getTestClassName());
-                    testResult.put("methodName", testCaseElement.getTestMethodName());
+                    try {
+                        Map<String, Object> testResult = new HashMap<>();
+                        testResult.put("className", testCaseElement.getTestClassName());
+                        testResult.put("methodName", testCaseElement.getTestMethodName());
 
-                    ITestElement.Result result = testCaseElement.getTestResult(false);
-                    testResult.put("status", result.toString());
+                        ITestElement.Result result = testCaseElement.getTestResult(false);
+                        testResult.put("status", result.toString());
 
-                    if (result == ITestElement.Result.FAILURE || result == ITestElement.Result.ERROR) {
-                        String trace = testCaseElement.getFailureTrace() != null ?
-                                testCaseElement.getFailureTrace().getTrace() : null;
-                        if (trace != null) {
-                            testResult.put("failureTrace", trace);
-                            // Extract line number from stack trace
-                            java.util.regex.Pattern linePattern = java.util.regex.Pattern.compile(
-                                    testCaseElement.getTestClassName().replace(".", "\\.") +
-                                    "\\." + testCaseElement.getTestMethodName() + "\\(.*:(\\d+)\\)");
-                            java.util.regex.Matcher matcher = linePattern.matcher(trace);
-                            if (matcher.find()) {
-                                testResult.put("line", Integer.parseInt(matcher.group(1)));
+                        if (result == ITestElement.Result.FAILURE || result == ITestElement.Result.ERROR) {
+                            String trace = testCaseElement.getFailureTrace() != null ?
+                                    testCaseElement.getFailureTrace().getTrace() : null;
+                            if (trace != null) {
+                                testResult.put("failureTrace", trace);
+                                // Extract line number from stack trace
+                                java.util.regex.Pattern linePattern = java.util.regex.Pattern.compile(
+                                        testCaseElement.getTestClassName().replace(".", "\\.") +
+                                        "\\." + testCaseElement.getTestMethodName() + "\\(.*:(\\d+)\\)");
+                                java.util.regex.Matcher matcher = linePattern.matcher(trace);
+                                if (matcher.find()) {
+                                    testResult.put("line", Integer.parseInt(matcher.group(1)));
+                                }
                             }
                         }
-                    }
 
-                    testResult.put("duration", testCaseElement.getElapsedTimeInSeconds());
-                    testResults.add(testResult);
+                        testResult.put("duration", testCaseElement.getElapsedTimeInSeconds());
+                        testResults.add(testResult);
+                    } catch (Exception e) {
+                        sessionState[2] = true; // hasError
+                        errorMessage[0] = "Error in testCaseFinished: " + e.getMessage();
+                    }
                 }
             };
 
@@ -832,12 +866,41 @@ public class ExecutionTools {
                 ILaunchConfiguration config = workingCopy.doSave();
                 ILaunch launch = config.launch(ILaunchManager.RUN_MODE, null, false);
 
+                // Wait for process to start (max 10 seconds)
+                int waitCount = 0;
+                while (launch.getProcesses().length == 0 && waitCount < 100) {
+                    Thread.sleep(100);
+                    waitCount++;
+                }
+
+                if (launch.getProcesses().length == 0) {
+                    config.delete();
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("projectName", projectName);
+                    result.put("className", fullyQualifiedName);
+                    result.put("status", "ERROR");
+                    result.put("message", "Failed to start test process. This may indicate a classpath or configuration issue.");
+                    if (integrationTestWarning != null) {
+                        result.put("warning", integrationTestWarning);
+                    }
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
+
                 // Wait for completion with timeout
                 boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
 
+                // Collect process output for diagnostics
+                String processOutput = null;
+                boolean processTerminated = true;
+                for (IProcess process : launch.getProcesses()) {
+                    if (!process.isTerminated()) {
+                        processTerminated = false;
+                    }
+                }
+
                 // Clean up
                 if (!completed) {
-                    // Terminate if still running
+                    // Terminate if still running - try graceful first
                     for (IProcess process : launch.getProcesses()) {
                         if (!process.isTerminated()) {
                             process.terminate();
@@ -854,9 +917,38 @@ public class ExecutionTools {
                 result.put("className", fullyQualifiedName);
                 result.put("methodName", methodName);
 
+                // Add diagnostic info
+                Map<String, Object> diagnostics = new HashMap<>();
+                diagnostics.put("sessionStarted", sessionState[0]);
+                diagnostics.put("sessionFinished", sessionState[1]);
+                diagnostics.put("processTerminated", processTerminated);
+                if (sessionState[2] && errorMessage[0] != null) {
+                    diagnostics.put("listenerError", errorMessage[0]);
+                }
+                result.put("diagnostics", diagnostics);
+
+                if (integrationTestWarning != null) {
+                    result.put("warning", integrationTestWarning);
+                }
+
                 if (!completed) {
                     result.put("status", "TIMEOUT");
-                    result.put("message", "Tests timed out after " + timeoutSeconds + " seconds");
+                    String message = "Tests timed out after " + timeoutSeconds + " seconds.";
+                    if (!sessionState[0]) {
+                        message += " Test session never started - this may indicate a Spring context initialization issue or missing dependencies.";
+                    } else if (!sessionState[1]) {
+                        message += " Test session started but never finished - tests may be hanging or waiting for external resources.";
+                    }
+                    result.put("message", message);
+                    result.put("testsRun", counts[0]);
+                    result.put("testResults", testResults);
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
+
+                // Check if session was properly initialized
+                if (!sessionState[0]) {
+                    result.put("status", "ERROR");
+                    result.put("message", "Test session was not properly initialized. JUnit listener may not have received events.");
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
 
@@ -866,7 +958,11 @@ public class ExecutionTools {
                 result.put("errors", counts[3]);
                 result.put("testResults", testResults);
 
-                if (counts[2] == 0 && counts[3] == 0) {
+                if (counts[0] == 0) {
+                    result.put("status", "WARNING");
+                    result.put("message", "No tests were executed. This may indicate that no @Test methods were found, " +
+                        "or tests were filtered out. For integration tests, consider using Maven Failsafe.");
+                } else if (counts[2] == 0 && counts[3] == 0) {
                     result.put("status", "SUCCESS");
                     result.put("message", "All " + counts[0] + " tests passed");
                 } else {
@@ -890,6 +986,49 @@ public class ExecutionTools {
             } catch (Exception ex) {
                 return new CallToolResult("Error running tests: " + e.getMessage(), true);
             }
+        }
+    }
+
+    /**
+     * Detects if a test class is a Spring Boot integration test by checking for common annotations.
+     */
+    private static boolean detectIntegrationTest(IType testType) {
+        try {
+            // Check for Spring Boot test annotations
+            String[] integrationAnnotations = {
+                "SpringBootTest",
+                "DataJpaTest",
+                "WebMvcTest",
+                "WebFluxTest",
+                "JdbcTest",
+                "DataMongoTest",
+                "DataRedisTest",
+                "RestClientTest",
+                "AutoConfigureMockMvc",
+                "Testcontainers",
+                "Container"
+            };
+
+            // Check class annotations
+            for (org.eclipse.jdt.core.IAnnotation annotation : testType.getAnnotations()) {
+                String annotationName = annotation.getElementName();
+                for (String integrationAnnotation : integrationAnnotations) {
+                    if (annotationName.equals(integrationAnnotation) ||
+                        annotationName.endsWith("." + integrationAnnotation)) {
+                        return true;
+                    }
+                }
+            }
+
+            // Also check if class name ends with "IT" (common convention for integration tests)
+            if (testType.getElementName().endsWith("IT")) {
+                return true;
+            }
+
+            return false;
+        } catch (Exception e) {
+            // If we can't determine, assume it's not an integration test
+            return false;
         }
     }
 }
