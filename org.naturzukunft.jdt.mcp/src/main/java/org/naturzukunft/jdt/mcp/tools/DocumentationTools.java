@@ -66,7 +66,7 @@ public class DocumentationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getJavadoc(
+        return new ToolRegistration(tool, (args, progress) -> getJavadoc(
                 (String) args.get("elementName"),
                 (String) args.get("elementType")));
     }
@@ -142,7 +142,7 @@ public class DocumentationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getAnnotations(
+        return new ToolRegistration(tool, (args, progress) -> getAnnotations(
                 (String) args.get("elementName"),
                 (String) args.get("elementType")));
     }
@@ -228,7 +228,7 @@ public class DocumentationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findAnnotatedElements(
+        return new ToolRegistration(tool, (args, progress) -> findAnnotatedElements(
                 (String) args.get("annotationName"),
                 (String) args.get("projectName")));
     }
@@ -345,7 +345,7 @@ public class DocumentationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateJavadoc(
+        return new ToolRegistration(tool, (args, progress) -> generateJavadoc(
                 (String) args.get("elementName"),
                 (String) args.get("elementType")));
     }

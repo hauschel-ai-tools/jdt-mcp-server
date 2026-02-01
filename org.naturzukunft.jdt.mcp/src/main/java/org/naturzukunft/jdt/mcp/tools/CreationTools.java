@@ -67,7 +67,7 @@ public class CreationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> createClass(
+        return new ToolRegistration(tool, (args, progress) -> createClass(
                 (String) args.get("projectName"),
                 (String) args.get("packageName"),
                 (String) args.get("className"),
@@ -182,7 +182,7 @@ public class CreationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> createInterface(
+        return new ToolRegistration(tool, (args, progress) -> createInterface(
                 (String) args.get("projectName"),
                 (String) args.get("packageName"),
                 (String) args.get("interfaceName"),
@@ -289,7 +289,7 @@ public class CreationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> createEnum(
+        return new ToolRegistration(tool, (args, progress) -> createEnum(
                 (String) args.get("projectName"),
                 (String) args.get("packageName"),
                 (String) args.get("enumName"),

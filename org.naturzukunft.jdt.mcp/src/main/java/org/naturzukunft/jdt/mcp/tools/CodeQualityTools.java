@@ -83,7 +83,7 @@ public class CodeQualityTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> quickFix(
+        return new ToolRegistration(tool, (args, progress) -> quickFix(
                 (String) args.get("filePath"),
                 args.get("problemOffset") != null ? ((Number) args.get("problemOffset")).intValue() : -1,
                 args.get("fixIndex") != null ? ((Number) args.get("fixIndex")).intValue() : 0,
@@ -277,7 +277,7 @@ public class CodeQualityTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findUnusedCode(
+        return new ToolRegistration(tool, (args, progress) -> findUnusedCode(
                 (String) args.get("projectName"),
                 args.get("scope") != null ? (String) args.get("scope") : "ALL"));
     }
@@ -408,7 +408,7 @@ public class CodeQualityTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findDeadCode((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> findDeadCode((String) args.get("projectName")));
     }
 
     private static CallToolResult findDeadCode(String projectName) {

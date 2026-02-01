@@ -89,7 +89,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> addMethod(
+        return new ToolRegistration(tool, (args, progress) -> addMethod(
                 (String) args.get("className"),
                 (String) args.get("methodName"),
                 (String) args.get("returnType"),
@@ -290,7 +290,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> addField(
+        return new ToolRegistration(tool, (args, progress) -> addField(
                 (String) args.get("className"),
                 (String) args.get("fieldName"),
                 (String) args.get("fieldType"),
@@ -478,7 +478,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> addImport(
+        return new ToolRegistration(tool, (args, progress) -> addImport(
                 (String) args.get("className"),
                 (String) args.get("imports")));
     }
@@ -596,7 +596,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> implementInterface(
+        return new ToolRegistration(tool, (args, progress) -> implementInterface(
                 (String) args.get("className"),
                 (String) args.get("interfaceName"),
                 args.get("generateMethodStubs") != null ? (Boolean) args.get("generateMethodStubs") : true));
@@ -958,7 +958,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateGettersSetters(
+        return new ToolRegistration(tool, (args, progress) -> generateGettersSetters(
                 (String) args.get("className"),
                 (String) args.get("fieldNames"),
                 args.get("generateGetters") != null ? (Boolean) args.get("generateGetters") : true,
@@ -1096,7 +1096,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateConstructor(
+        return new ToolRegistration(tool, (args, progress) -> generateConstructor(
                 (String) args.get("className"),
                 (String) args.get("fieldNames"),
                 args.get("generateNoArgs") != null ? (Boolean) args.get("generateNoArgs") : false));
@@ -1238,7 +1238,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateEqualsHashCode(
+        return new ToolRegistration(tool, (args, progress) -> generateEqualsHashCode(
                 (String) args.get("className"),
                 (String) args.get("fieldNames")));
     }
@@ -1376,7 +1376,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateToString(
+        return new ToolRegistration(tool, (args, progress) -> generateToString(
                 (String) args.get("className"),
                 (String) args.get("fieldNames")));
     }
@@ -1497,7 +1497,7 @@ public class CodeGenerationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> generateDelegateMethods(
+        return new ToolRegistration(tool, (args, progress) -> generateDelegateMethods(
                 (String) args.get("className"),
                 (String) args.get("fieldName"),
                 (String) args.get("methodNames")));

@@ -90,7 +90,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> renameElement(
+        return new ToolRegistration(tool, (args, progress) -> renameElement(
                 (String) args.get("elementName"),
                 (String) args.get("newName"),
                 (String) args.get("elementType"),
@@ -238,7 +238,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> extractMethod(
+        return new ToolRegistration(tool, (args, progress) -> extractMethod(
                 (String) args.get("filePath"),
                 ((Number) args.get("startOffset")).intValue(),
                 ((Number) args.get("endOffset")).intValue(),
@@ -361,7 +361,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> moveType(
+        return new ToolRegistration(tool, (args, progress) -> moveType(
                 (String) args.get("typeName"),
                 (String) args.get("targetPackage"),
                 args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
@@ -486,7 +486,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> organizeImports(
+        return new ToolRegistration(tool, (args, progress) -> organizeImports(
                 (String) args.get("filePath"),
                 args.get("removeUnused") != null ? (Boolean) args.get("removeUnused") : true));
     }
@@ -675,7 +675,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> inlineElement(
+        return new ToolRegistration(tool, (args, progress) -> inlineElement(
                 (String) args.get("filePath"),
                 ((Number) args.get("offset")).intValue(),
                 args.get("preview") != null ? (Boolean) args.get("preview") : false));
@@ -768,7 +768,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> extractInterface(
+        return new ToolRegistration(tool, (args, progress) -> extractInterface(
                 (String) args.get("className"),
                 (String) args.get("interfaceName"),
                 args.get("methodNames") != null ? (List<String>) args.get("methodNames") : List.of("*"),
@@ -998,7 +998,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> changeMethodSignature(
+        return new ToolRegistration(tool, (args, progress) -> changeMethodSignature(
                 (String) args.get("className"),
                 (String) args.get("methodName"),
                 (String) args.get("newName"),
@@ -1140,7 +1140,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> convertToLambda(
+        return new ToolRegistration(tool, (args, progress) -> convertToLambda(
                 (String) args.get("filePath"),
                 ((Number) args.get("offset")).intValue(),
                 args.get("preview") != null ? (Boolean) args.get("preview") : false));
@@ -1313,7 +1313,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> encapsulateField(
+        return new ToolRegistration(tool, (args, progress) -> encapsulateField(
                 (String) args.get("className"),
                 (String) args.get("fieldName"),
                 args.get("generateGetter") != null ? (Boolean) args.get("generateGetter") : true,
@@ -1428,7 +1428,7 @@ public class RefactoringTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> introduceParameter(
+        return new ToolRegistration(tool, (args, progress) -> introduceParameter(
                 (String) args.get("filePath"),
                 ((Number) args.get("offset")).intValue(),
                 args.get("length") != null ? ((Number) args.get("length")).intValue() : 0,

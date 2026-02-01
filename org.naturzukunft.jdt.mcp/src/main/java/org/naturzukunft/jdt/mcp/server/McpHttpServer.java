@@ -3,6 +3,7 @@ package org.naturzukunft.jdt.mcp.server;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -21,13 +22,14 @@ import jakarta.servlet.http.HttpServletResponse;
  * Embedded HTTP server for MCP protocol using Jetty.
  * Provides SSE (Server-Sent Events) transport for MCP communication.
  */
-public class McpHttpServer {
+public class McpHttpServer implements ProgressNotificationSender {
 
     private final Server server;
     private final int port;
     private final McpProtocolHandler protocolHandler;
     private final Map<String, SseConnection> sseConnections = new ConcurrentHashMap<>();
     private final AtomicLong connectionIdCounter = new AtomicLong(0);
+    private final String sessionId = UUID.randomUUID().toString();
 
     public McpHttpServer(int port, McpProtocolHandler protocolHandler) {
         this.port = port;
@@ -113,6 +115,17 @@ public class McpHttpServer {
         }
     }
 
+    @Override
+    public void sendProgress(String progressToken, int current, int total, String message) {
+        // Build MCP progress notification JSON
+        String progressJson = String.format(
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":\"%s\",\"progress\":%d,\"total\":%d,\"message\":\"%s\"}}",
+            progressToken, current, total, message != null ? message.replace("\"", "\\\"") : ""
+        );
+        // Broadcast to all SSE connections
+        broadcastEvent("message", progressJson);
+    }
+
     /**
      * MCP HTTP Servlet - direct HTTP transport (like Spring Tools MCP).
      * Handles JSON-RPC requests synchronously.
@@ -124,10 +137,14 @@ public class McpHttpServer {
         protected void doPost(HttpServletRequest req, HttpServletResponse resp)
                 throws ServletException, IOException {
 
+            // MCP Session ID header (required by Claude Code)
+            resp.setHeader("Mcp-Session-Id", sessionId);
+
             // CORS headers
             resp.setHeader("Access-Control-Allow-Origin", "*");
             resp.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-            resp.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            resp.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id");
+            resp.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 
             // Read request body
             StringBuilder body = new StringBuilder();
@@ -156,10 +173,14 @@ public class McpHttpServer {
         @Override
         protected void doOptions(HttpServletRequest req, HttpServletResponse resp)
                 throws ServletException, IOException {
+            // MCP Session ID header (required by Claude Code)
+            resp.setHeader("Mcp-Session-Id", sessionId);
+
             // CORS preflight
             resp.setHeader("Access-Control-Allow-Origin", "*");
             resp.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-            resp.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            resp.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id");
+            resp.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
             resp.setStatus(HttpServletResponse.SC_OK);
         }
     }

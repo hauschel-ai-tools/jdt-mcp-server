@@ -60,7 +60,7 @@ public class NavigationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findType((String) args.get("pattern")));
+        return new ToolRegistration(tool, (args, progress) -> findType((String) args.get("pattern")));
     }
 
     private static CallToolResult findType(String pattern) {
@@ -146,7 +146,7 @@ public class NavigationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getMethodSignature(
+        return new ToolRegistration(tool, (args, progress) -> getMethodSignature(
                 (String) args.get("className"),
                 (String) args.get("methodName")));
     }
@@ -230,7 +230,7 @@ public class NavigationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findImplementations((String) args.get("typeName")));
+        return new ToolRegistration(tool, (args, progress) -> findImplementations((String) args.get("typeName")));
     }
 
     private static CallToolResult findImplementations(String typeName) {
@@ -316,7 +316,7 @@ public class NavigationTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> findCallers(
+        return new ToolRegistration(tool, (args, progress) -> findCallers(
                 (String) args.get("className"),
                 (String) args.get("methodName")));
     }

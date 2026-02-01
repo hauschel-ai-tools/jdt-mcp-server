@@ -31,6 +31,16 @@ public class McpProtocolHandler {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, ToolRegistration> tools = new HashMap<>();
 
+    // For sending progress notifications
+    private ProgressNotificationSender progressSender;
+
+    /**
+     * Sets the progress notification sender.
+     */
+    public void setProgressSender(ProgressNotificationSender sender) {
+        this.progressSender = sender;
+    }
+
     /**
      * Register a tool.
      */
@@ -110,6 +120,10 @@ public class McpProtocolHandler {
         toolsCapability.put("listChanged", false);
         capabilities.put("tools", toolsCapability);
 
+        // Progress notification capability - server supports sending progress
+        // MCP protocol expects empty object {} for capability flags, not boolean
+        capabilities.put("experimental", Map.of("progress", Map.of()));
+
         result.put("capabilities", capabilities);
 
         System.out.println("[JDT MCP] Client initialized");
@@ -167,6 +181,13 @@ public class McpProtocolHandler {
         String toolName = params.path("name").asText();
         JsonNode arguments = params.get("arguments");
 
+        // Extract progressToken from _meta if present
+        JsonNode metaNode = params.get("_meta");
+        String progressToken = null;
+        if (metaNode != null && metaNode.has("progressToken")) {
+            progressToken = metaNode.get("progressToken").asText();
+        }
+
         ToolRegistration registration = tools.get(toolName);
         if (registration == null) {
             throw new McpException(-32602, "Unknown tool: " + toolName);
@@ -184,9 +205,21 @@ public class McpProtocolHandler {
 
         System.out.println("[JDT MCP] Calling tool: " + toolName + " with args: " + args);
 
+        // Create progress reporter
+        final String token = progressToken;
+        ProgressReporter progressReporter = (token != null && progressSender != null)
+            ? (current, total, message) -> {
+                try {
+                    progressSender.sendProgress(token, current, total, message);
+                } catch (Exception e) {
+                    System.err.println("[JDT MCP] Error sending progress: " + e.getMessage());
+                }
+            }
+            : ProgressReporter.NOOP;
+
         // Call the tool handler
         try {
-            CallToolResult toolResult = registration.handler().handle(args);
+            CallToolResult toolResult = registration.handler().handle(args, progressReporter);
 
             Map<String, Object> result = new HashMap<>();
 

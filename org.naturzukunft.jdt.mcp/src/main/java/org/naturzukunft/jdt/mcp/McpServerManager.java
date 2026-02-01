@@ -18,6 +18,8 @@ import org.naturzukunft.jdt.mcp.tools.NavigationTools;
 import org.naturzukunft.jdt.mcp.tools.ProjectInfoTools;
 import org.naturzukunft.jdt.mcp.tools.RefactoringTools;
 
+import org.naturzukunft.jdt.mcp.server.ProgressReporter;
+
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
@@ -127,6 +129,10 @@ public class McpServerManager {
 
             // Create and start HTTP server
             httpServer = new McpHttpServer(port, protocolHandler);
+
+            // Connect progress sender
+            protocolHandler.setProgressSender(httpServer);
+
             httpServer.start();
 
             running = true;
@@ -215,6 +221,28 @@ public class McpServerManager {
      */
     @FunctionalInterface
     public interface ToolHandler {
+        /**
+         * Handles a tool call with progress reporting support.
+         *
+         * @param args the tool arguments
+         * @param progress reporter for sending progress updates (may be NOOP)
+         * @return the tool result
+         */
+        CallToolResult handle(Map<String, Object> args, ProgressReporter progress);
+
+        /**
+         * Creates a ToolHandler from a simple handler that doesn't need progress.
+         */
+        static ToolHandler simple(SimpleToolHandler handler) {
+            return (args, progress) -> handler.handle(args);
+        }
+    }
+
+    /**
+     * Simple tool handler without progress support (for backwards compatibility).
+     */
+    @FunctionalInterface
+    public interface SimpleToolHandler {
         CallToolResult handle(Map<String, Object> args);
     }
 }

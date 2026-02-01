@@ -51,7 +51,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> listProjects());
+        return new ToolRegistration(tool, (args, progress) -> listProjects());
     }
 
     private static CallToolResult listProjects() {
@@ -186,7 +186,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getClasspath((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getClasspath((String) args.get("projectName")));
     }
 
     private static CallToolResult getClasspath(String projectName) {
@@ -260,7 +260,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getCompilationErrors((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getCompilationErrors((String) args.get("projectName")));
     }
 
     private static CallToolResult getCompilationErrors(String projectName) {
@@ -329,7 +329,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> getProjectStructure((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getProjectStructure((String) args.get("projectName")));
     }
 
     private static CallToolResult getProjectStructure(String projectName) {
@@ -397,7 +397,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, args -> refreshProject((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> refreshProject((String) args.get("projectName")));
     }
 
     private static CallToolResult refreshProject(String projectName) {
