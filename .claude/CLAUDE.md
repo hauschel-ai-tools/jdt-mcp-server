@@ -36,17 +36,6 @@ In Eclipse: Help → Install New Software → Add → Local → obigen Pfad wäh
 ## Git
 
 - Repository: https://git.changinggraph.org/ai-tools/jdt-mcp-server
-- Push mit automation-Token
-
-### KRITISCH: Commit-Autor
-
-**NIEMALS ohne --author committen!** Immer so:
-
-```bash
-git commit --author="automation" -m "message"
-```
-
-Ohne `--author` wird als lokaler User (naturzukunft) committed - DAS IST FALSCH!
 
 ## Projektstruktur
 
