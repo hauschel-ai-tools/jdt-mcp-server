@@ -111,6 +111,8 @@ public class McpServerManager {
                 ExecutionTools.runMainTool(),
                 ExecutionTools.listTestsTool(),
                 ExecutionTools.runTestsTool(),
+                ExecutionTools.startTestsAsyncTool(),
+                ExecutionTools.getTestResultTool(),
 
                 // Documentation Tools
                 DocumentationTools.getJavadocTool(),

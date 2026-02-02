@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolHandler;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
@@ -203,33 +204,49 @@ public class McpProtocolHandler {
             }
         }
 
-        System.out.println("[JDT MCP] Calling tool: " + toolName + " with args: " + args);
+        McpLogger.info("Protocol", "Calling tool: " + toolName);
+        McpLogger.debug("Protocol", "Tool args: " + args);
+        McpLogger.debug("Protocol", "progressToken: " + progressToken + ", progressSender: " + (progressSender != null ? "set" : "null"));
 
         // Create progress reporter
-        final String token = progressToken;
-        ProgressReporter progressReporter = (token != null && progressSender != null)
+        // If client didn't send a progressToken, generate one server-side
+        // This is a workaround for Claude Code not sending progressToken
+        final String token = progressToken != null ? progressToken : "server-generated-" + System.currentTimeMillis();
+        if (progressToken == null) {
+            McpLogger.debug("Protocol", "Client didn't send progressToken, using server-generated: " + token);
+        }
+        ProgressReporter progressReporter = (progressSender != null)
             ? (current, total, message) -> {
                 try {
                     progressSender.sendProgress(token, current, total, message);
+                    McpLogger.debug("Protocol", "Sent progress: " + current + "/" + total + " - " + message);
                 } catch (Exception e) {
-                    System.err.println("[JDT MCP] Error sending progress: " + e.getMessage());
+                    McpLogger.warn("Protocol", "Error sending progress: " + e.getMessage());
                 }
             }
             : ProgressReporter.NOOP;
 
         // Call the tool handler
         try {
+            long startTime = System.currentTimeMillis();
             CallToolResult toolResult = registration.handler().handle(args, progressReporter);
+            long duration = System.currentTimeMillis() - startTime;
+
+            McpLogger.info("Protocol", "Tool " + toolName + " completed in " + duration + "ms, isError=" + toolResult.isError());
 
             Map<String, Object> result = new HashMap<>();
 
             // Create content array
             List<Map<String, Object>> contentList = new ArrayList<>();
+            int contentCount = 0;
             for (Content contentItem : toolResult.content()) {
+                contentCount++;
                 Map<String, Object> contentMap = new HashMap<>();
                 if (contentItem instanceof TextContent tc) {
                     contentMap.put("type", "text");
                     contentMap.put("text", tc.text());
+                    McpLogger.debug("Protocol", "Content item " + contentCount + " text length: " +
+                            (tc.text() != null ? tc.text().length() : 0));
                 } else {
                     contentMap.put("type", "text");
                     contentMap.put("text", contentItem.toString());
@@ -237,14 +254,18 @@ public class McpProtocolHandler {
                 contentList.add(contentMap);
             }
 
+            if (contentList.isEmpty()) {
+                McpLogger.warn("Protocol", "Tool " + toolName + " returned EMPTY content list!");
+            }
+
             result.put("content", contentList);
             result.put("isError", toolResult.isError());
 
+            McpLogger.debug("Protocol", "Returning result with " + contentList.size() + " content items");
             return result;
 
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Tool error: " + e.getMessage());
-            e.printStackTrace();
+            McpLogger.error("Protocol", "Tool " + toolName + " threw exception", e);
 
             Map<String, Object> result = new HashMap<>();
             List<Map<String, Object>> content = new ArrayList<>();

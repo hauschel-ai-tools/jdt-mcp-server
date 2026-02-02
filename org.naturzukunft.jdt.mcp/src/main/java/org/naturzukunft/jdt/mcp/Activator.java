@@ -20,7 +20,10 @@ public class Activator extends AbstractUIPlugin {
     public void start(BundleContext context) throws Exception {
         super.start(context);
         plugin = this;
-        System.out.println("[JDT MCP] Plugin activated");
+
+        // Initialize logger first
+        McpLogger.init();
+        McpLogger.info("Activator", "Plugin activated");
 
         // Auto-start MCP server
         startMcpServer();
@@ -31,7 +34,7 @@ public class Activator extends AbstractUIPlugin {
         stopMcpServer();
         plugin = null;
         super.stop(context);
-        System.out.println("[JDT MCP] Plugin deactivated");
+        McpLogger.info("Activator", "Plugin deactivated");
     }
 
     /**

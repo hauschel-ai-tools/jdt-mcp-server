@@ -8,7 +8,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
@@ -36,6 +39,7 @@ import org.eclipse.jdt.junit.model.ITestCaseElement;
 import org.eclipse.jdt.junit.model.ITestElement;
 import org.eclipse.jdt.junit.model.ITestRunSession;
 import org.eclipse.jdt.launching.IJavaLaunchConfigurationConstants;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -708,6 +712,16 @@ public class ExecutionTools {
 
     private static CallToolResult runTestsWithJUnit(String projectName, String className, String methodName,
             int timeoutSeconds, org.naturzukunft.jdt.mcp.server.ProgressReporter progress) {
+        final String LOG_TAG = "RunTests";
+        McpLogger.info(LOG_TAG, "=== Starting test run ===");
+        McpLogger.info(LOG_TAG, "Project: " + projectName + ", Class: " + className +
+                ", Method: " + (methodName != null ? methodName : "(all)") + ", Timeout: " + timeoutSeconds + "s");
+
+        // Heartbeat mechanism to prevent MCP client timeout (Claude Code has 60s timeout)
+        // Declared here so it can be stopped in catch block
+        final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
+        final long HEARTBEAT_INTERVAL_SECONDS = 15;
+
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
@@ -798,6 +812,7 @@ public class ExecutionTools {
             }
 
             String configName = "MCP-Test-" + testType.getElementName() + "-" + System.currentTimeMillis();
+            McpLogger.info(LOG_TAG, "Creating launch configuration: " + configName);
             ILaunchConfigurationWorkingCopy workingCopy = junitType.newInstance(null, configName);
 
             // Configure the launch
@@ -827,6 +842,7 @@ public class ExecutionTools {
             final String[] errorMessage = new String[1];
             final int[] progressCounter = new int[1]; // for tracking progress
             final String expectedConfigName = configName; // for session filtering
+            final AtomicInteger heartbeatCounter = new AtomicInteger(0);
 
             TestRunListener listener = new TestRunListener() {
 
@@ -838,30 +854,40 @@ public class ExecutionTools {
 
                 @Override
                 public void sessionLaunched(ITestRunSession session) {
-                    if (!isOurSession(session)) return;
+                    McpLogger.debug(LOG_TAG, "sessionLaunched callback - session: " + session.getTestRunName());
+                    if (!isOurSession(session)) {
+                        McpLogger.debug(LOG_TAG, "Ignoring foreign session");
+                        return;
+                    }
                     try {
                         sessionState[0] = true; // sessionLaunched
+                        McpLogger.info(LOG_TAG, "Test session launched");
                         progress.report(0, expectedTotal, "Test session launched, initializing...");
                     } catch (Exception e) {
                         sessionState[3] = true; // hasError
                         errorMessage[0] = "Error in sessionLaunched: " + e.getMessage();
+                        McpLogger.error(LOG_TAG, "Error in sessionLaunched", e);
                     }
                 }
 
                 @Override
                 public void sessionStarted(ITestRunSession session) {
+                    McpLogger.debug(LOG_TAG, "sessionStarted callback - session: " + session.getTestRunName());
                     if (!isOurSession(session)) return;
                     try {
                         sessionState[1] = true; // sessionStarted
+                        McpLogger.info(LOG_TAG, "Test session started - test tree initialized");
                         progress.report(0, expectedTotal, "Test session started");
                     } catch (Exception e) {
                         sessionState[3] = true; // hasError
                         errorMessage[0] = "Error in sessionStarted: " + e.getMessage();
+                        McpLogger.error(LOG_TAG, "Error in sessionStarted", e);
                     }
                 }
 
                 @Override
                 public void sessionFinished(ITestRunSession session) {
+                    McpLogger.debug(LOG_TAG, "sessionFinished callback - session: " + session.getTestRunName());
                     if (!isOurSession(session)) return;
                     try {
                         sessionState[2] = true; // sessionFinished
@@ -876,11 +902,15 @@ public class ExecutionTools {
                         counts[3] = (int) testResults.stream()
                                 .filter(r -> "ERROR".equals(r.get("status")))
                                 .count(); // errors
+                        McpLogger.info(LOG_TAG, "Test session finished - Total: " + counts[0] +
+                                ", Passed: " + counts[1] + ", Failed: " + counts[2] + ", Errors: " + counts[3]);
                         progress.report(counts[0], expectedTotal, "Tests completed: " + counts[1] + " passed, " + counts[2] + " failed");
                     } catch (Exception e) {
                         sessionState[3] = true; // hasError
                         errorMessage[0] = "Error in sessionFinished: " + e.getMessage();
+                        McpLogger.error(LOG_TAG, "Error in sessionFinished", e);
                     } finally {
+                        McpLogger.debug(LOG_TAG, "Counting down latch");
                         latch.countDown();
                     }
                 }
@@ -889,6 +919,8 @@ public class ExecutionTools {
                 public void testCaseFinished(ITestCaseElement testCaseElement) {
                     // Only process if our session was launched (testCaseElement has no session reference)
                     if (!sessionState[0]) return;
+                    McpLogger.debug(LOG_TAG, "testCaseFinished: " + testCaseElement.getTestClassName() +
+                            "#" + testCaseElement.getTestMethodName());
                     try {
                         Map<String, Object> testResult = new HashMap<>();
                         testResult.put("className", testCaseElement.getTestClassName());
@@ -934,17 +966,22 @@ public class ExecutionTools {
 
             try {
                 // Launch the tests
+                McpLogger.info(LOG_TAG, "Saving launch configuration...");
                 ILaunchConfiguration config = workingCopy.doSave();
+                McpLogger.info(LOG_TAG, "Launching tests in RUN_MODE...");
                 ILaunch launch = config.launch(ILaunchManager.RUN_MODE, null, false);
 
                 // Wait for process to start (max 10 seconds)
+                McpLogger.debug(LOG_TAG, "Waiting for process to start...");
                 int waitCount = 0;
                 while (launch.getProcesses().length == 0 && waitCount < 100) {
                     Thread.sleep(100);
                     waitCount++;
                 }
+                McpLogger.debug(LOG_TAG, "Process wait completed after " + (waitCount * 100) + "ms, processes: " + launch.getProcesses().length);
 
                 if (launch.getProcesses().length == 0) {
+                    McpLogger.error(LOG_TAG, "No process started after 10 seconds");
                     config.delete();
                     Map<String, Object> result = new HashMap<>();
                     result.put("projectName", projectName);
@@ -957,8 +994,25 @@ public class ExecutionTools {
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
 
+                // Start heartbeat to prevent MCP client timeout
+                // Claude Code has a 60s timeout for MCP tool calls, so we send progress every 15s
+                McpLogger.info(LOG_TAG, "Starting heartbeat (every " + HEARTBEAT_INTERVAL_SECONDS + "s)...");
+                heartbeatExecutor.scheduleAtFixedRate(() -> {
+                    try {
+                        int count = heartbeatCounter.incrementAndGet();
+                        String phase = sessionState[1] ? "Running tests" : "Initializing (Spring context, Testcontainers, etc.)";
+                        String message = phase + "... (" + (count * HEARTBEAT_INTERVAL_SECONDS) + "s elapsed)";
+                        McpLogger.debug(LOG_TAG, "Heartbeat #" + count + ": " + message);
+                        progress.report(progressCounter[0], expectedTotal, message);
+                    } catch (Exception e) {
+                        McpLogger.warn(LOG_TAG, "Heartbeat failed: " + e.getMessage());
+                    }
+                }, HEARTBEAT_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS);
+
                 // Wait for completion with timeout
+                McpLogger.info(LOG_TAG, "Waiting for test completion (timeout: " + timeoutSeconds + "s)...");
                 boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
+                McpLogger.info(LOG_TAG, "Latch await completed: " + (completed ? "SUCCESS" : "TIMEOUT"));
 
                 // Check process termination state
                 boolean processTerminated = true;
@@ -970,15 +1024,18 @@ public class ExecutionTools {
 
                 // Clean up
                 if (!completed) {
+                    McpLogger.warn(LOG_TAG, "Test timed out - terminating processes...");
                     // Terminate if still running - try graceful first
                     for (IProcess process : launch.getProcesses()) {
                         if (!process.isTerminated()) {
+                            McpLogger.debug(LOG_TAG, "Terminating process: " + process.getLabel());
                             process.terminate();
                         }
                     }
                 }
 
                 // Delete temporary launch config
+                McpLogger.debug(LOG_TAG, "Deleting launch configuration...");
                 config.delete();
 
                 // Build result
@@ -1032,6 +1089,9 @@ public class ExecutionTools {
                     } else if (!sessionState[2]) {
                         message += " Test session started but never finished - tests may be hanging or waiting for external resources.";
                     }
+                    McpLogger.warn(LOG_TAG, "Returning TIMEOUT result: " + message);
+                    McpLogger.debug(LOG_TAG, "Session state: launched=" + sessionState[0] +
+                            ", started=" + sessionState[1] + ", finished=" + sessionState[2] + ", hasError=" + sessionState[3]);
                     result.put("message", message);
                     result.put("testsRun", counts[0]);
                     result.put("testResults", testResults);
@@ -1039,7 +1099,9 @@ public class ExecutionTools {
                     if (!processOutput.isEmpty()) {
                         result.put("processOutput", truncateOutput(processOutput, 5000));
                     }
-                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                    String jsonResult = MAPPER.writeValueAsString(result);
+                    McpLogger.info(LOG_TAG, "=== Test run finished (TIMEOUT) ===");
+                    return new CallToolResult(jsonResult, true);
                 }
 
                 // Check if session was properly initialized
@@ -1051,12 +1113,15 @@ public class ExecutionTools {
                     } else {
                         message += " JUnit listener may not have received events.";
                     }
+                    McpLogger.error(LOG_TAG, "Session not initialized: " + message);
                     result.put("message", message);
                     // Add process output to help diagnose the issue
                     if (!processOutput.isEmpty()) {
                         result.put("processOutput", truncateOutput(processOutput, 5000));
                     }
-                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                    String jsonResult = MAPPER.writeValueAsString(result);
+                    McpLogger.info(LOG_TAG, "=== Test run finished (ERROR - session not initialized) ===");
+                    return new CallToolResult(jsonResult, true);
                 }
 
                 result.put("testsRun", counts[0]);
@@ -1065,32 +1130,48 @@ public class ExecutionTools {
                 result.put("errors", counts[3]);
                 result.put("testResults", testResults);
 
+                String status;
                 if (counts[0] == 0) {
-                    result.put("status", "WARNING");
+                    status = "WARNING";
+                    result.put("status", status);
                     result.put("message", "No tests were executed. This may indicate that no @Test methods were found, " +
                         "or tests were filtered out. For integration tests, consider using Maven Failsafe.");
                 } else if (counts[2] == 0 && counts[3] == 0) {
-                    result.put("status", "SUCCESS");
+                    status = "SUCCESS";
+                    result.put("status", status);
                     result.put("message", "All " + counts[0] + " tests passed");
                 } else {
-                    result.put("status", "FAILURE");
+                    status = "FAILURE";
+                    result.put("status", status);
                     result.put("message", counts[2] + " failures, " + counts[3] + " errors out of " + counts[0] + " tests");
                 }
 
-                return new CallToolResult(MAPPER.writeValueAsString(result), counts[2] > 0 || counts[3] > 0);
+                String jsonResult = MAPPER.writeValueAsString(result);
+                McpLogger.info(LOG_TAG, "=== Test run finished (" + status + ") ===");
+                McpLogger.debug(LOG_TAG, "Result JSON length: " + jsonResult.length());
+                return new CallToolResult(jsonResult, counts[2] > 0 || counts[3] > 0);
 
             } finally {
+                // Stop heartbeat
+                McpLogger.debug(LOG_TAG, "Stopping heartbeat executor...");
+                heartbeatExecutor.shutdownNow();
                 JUnitCore.removeTestRunListener(listener);
             }
 
         } catch (Exception e) {
+            McpLogger.error(LOG_TAG, "Exception during test run", e);
+            // Ensure heartbeat is stopped even on exception
+            heartbeatExecutor.shutdownNow();
             Map<String, Object> error = new HashMap<>();
             error.put("status", "ERROR");
             error.put("message", "Error running tests: " + e.getMessage());
             error.put("exceptionType", e.getClass().getSimpleName());
             try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+                String jsonResult = MAPPER.writeValueAsString(error);
+                McpLogger.info(LOG_TAG, "=== Test run finished (EXCEPTION) ===");
+                return new CallToolResult(jsonResult, true);
             } catch (Exception ex) {
+                McpLogger.error(LOG_TAG, "Failed to serialize error result", ex);
                 return new CallToolResult("Error running tests: " + e.getMessage(), true);
             }
         }
@@ -1240,6 +1321,349 @@ public class ExecutionTools {
             return false;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    // ========================================================================
+    // ASYNC TEST TOOLS (Two-Tool Pattern for long-running tests)
+    // ========================================================================
+
+    /**
+     * Creates the jdt_start_tests_async tool registration.
+     * Starts tests in background and returns immediately with a taskId.
+     */
+    public static ToolRegistration startTestsAsyncTool() {
+        Map<String, Object> properties = new HashMap<>();
+
+        Map<String, Object> projectName = new HashMap<>();
+        projectName.put("type", "string");
+        projectName.put("description", "Eclipse project name (get from jdt_list_projects)");
+        properties.put("projectName", projectName);
+
+        Map<String, Object> className = new HashMap<>();
+        className.put("type", "string");
+        className.put("description", "Test class (simple name like 'UserServiceTest' or fully qualified)");
+        properties.put("className", className);
+
+        Map<String, Object> methodName = new HashMap<>();
+        methodName.put("type", "string");
+        methodName.put("description", "Run only this test method (optional)");
+        properties.put("methodName", methodName);
+
+        Map<String, Object> timeoutSeconds = new HashMap<>();
+        timeoutSeconds.put("type", "integer");
+        timeoutSeconds.put("description", "Max execution time in seconds (default: 300)");
+        properties.put("timeoutSeconds", timeoutSeconds);
+
+        JsonSchema schema = new JsonSchema("object", properties, List.of("projectName", "className"), null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_start_tests_async",
+                "🚀 START LONG-RUNNING TESTS! Use this instead of jdt_run_tests for integration tests " +
+                "(Spring Boot, Testcontainers) that take >30s. Returns a taskId immediately. " +
+                "Then call jdt_get_test_result(taskId) to check progress/results. " +
+                "WORKFLOW: 1) jdt_start_tests_async → taskId  2) wait 30s  3) jdt_get_test_result(taskId) → repeat until done",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> startTestsAsync(
+                (String) args.get("projectName"),
+                (String) args.get("className"),
+                (String) args.get("methodName"),
+                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300));
+    }
+
+    /**
+     * Creates the jdt_get_test_result tool registration.
+     * Gets the status/result of an async test run.
+     */
+    public static ToolRegistration getTestResultTool() {
+        Map<String, Object> properties = new HashMap<>();
+
+        Map<String, Object> taskId = new HashMap<>();
+        taskId.put("type", "string");
+        taskId.put("description", "The taskId returned by jdt_start_tests_async");
+        properties.put("taskId", taskId);
+
+        JsonSchema schema = new JsonSchema("object", properties, List.of("taskId"), null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_get_test_result",
+                "📊 Get status/result of async test run. Returns: status (STARTING/RUNNING/COMPLETED/ERROR/TIMEOUT), " +
+                "progress (tests run/total), and results when completed. Call every 30s until status is COMPLETED.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> getTestResult((String) args.get("taskId")));
+    }
+
+    private static CallToolResult startTestsAsync(String projectName, String className, String methodName, int timeoutSeconds) {
+        final String LOG_TAG = "AsyncTests";
+        String taskId = "test-" + System.currentTimeMillis();
+
+        McpLogger.info(LOG_TAG, "Starting async test: " + taskId);
+        McpLogger.info(LOG_TAG, "Project: " + projectName + ", Class: " + className +
+                ", Method: " + (methodName != null ? methodName : "(all)") + ", Timeout: " + timeoutSeconds + "s");
+
+        AsyncTestRegistry.TestSession session = new AsyncTestRegistry.TestSession(taskId, projectName, className, methodName);
+        AsyncTestRegistry.getInstance().register(taskId, session);
+
+        // Start test in background thread
+        Thread testThread = new Thread(() -> {
+            runTestsInBackground(session, timeoutSeconds);
+        }, "AsyncTest-" + taskId);
+        testThread.setDaemon(true);
+        testThread.start();
+
+        // Return immediately with taskId
+        Map<String, Object> response = new HashMap<>();
+        response.put("taskId", taskId);
+        response.put("status", "STARTED");
+        response.put("message", "Test started in background. Call jdt_get_test_result('" + taskId + "') to check progress.");
+
+        try {
+            return new CallToolResult(MAPPER.writeValueAsString(response), false);
+        } catch (Exception e) {
+            return new CallToolResult("{\"taskId\":\"" + taskId + "\",\"status\":\"STARTED\"}", false);
+        }
+    }
+
+    private static void runTestsInBackground(AsyncTestRegistry.TestSession session, int timeoutSeconds) {
+        final String LOG_TAG = "AsyncTests";
+
+        try {
+            IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(session.getProjectName());
+            if (project == null || !project.exists()) {
+                session.setErrorMessage("Project not found: " + session.getProjectName());
+                session.complete(AsyncTestRegistry.TestSession.Status.ERROR);
+                return;
+            }
+
+            IJavaProject javaProject = JavaCore.create(project);
+            if (javaProject == null || !javaProject.exists()) {
+                session.setErrorMessage("Not a Java project: " + session.getProjectName());
+                session.complete(AsyncTestRegistry.TestSession.Status.ERROR);
+                return;
+            }
+
+            // Find test class
+            String className = session.getClassName();
+            IType testType = javaProject.findType(className);
+
+            // If not found, search by simple name
+            if (testType == null) {
+                for (IPackageFragmentRoot root : javaProject.getPackageFragmentRoots()) {
+                    if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                        for (IJavaElement child : root.getChildren()) {
+                            if (child instanceof IPackageFragment pkg) {
+                                for (ICompilationUnit cu : pkg.getCompilationUnits()) {
+                                    for (IType type : cu.getTypes()) {
+                                        if (type.getElementName().equals(className)) {
+                                            testType = type;
+                                            break;
+                                        }
+                                    }
+                                    if (testType != null) break;
+                                }
+                                if (testType != null) break;
+                            }
+                        }
+                        if (testType != null) break;
+                    }
+                }
+            }
+
+            if (testType == null) {
+                session.setErrorMessage("Test class not found: " + className);
+                session.complete(AsyncTestRegistry.TestSession.Status.ERROR);
+                return;
+            }
+
+            final IType finalTestType = testType;
+            session.setStatus(AsyncTestRegistry.TestSession.Status.RUNNING);
+
+            // Count expected tests
+            List<String> expectedTests = new ArrayList<>();
+            collectTestMethods(finalTestType, expectedTests);
+            session.setExpectedTotal(session.getMethodName() != null ? 1 : expectedTests.size());
+
+            // Create launch configuration
+            String configName = "MCP-AsyncTest-" + session.getTaskId();
+            ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
+            ILaunchConfigurationType type = launchManager.getLaunchConfigurationType("org.eclipse.jdt.junit.launchconfig");
+            ILaunchConfigurationWorkingCopy workingCopy = type.newInstance(null, configName);
+
+            workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, session.getProjectName());
+            workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, finalTestType.getFullyQualifiedName());
+            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", "org.eclipse.jdt.junit.loader.junit5");
+
+            if (session.getMethodName() != null) {
+                workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", session.getMethodName());
+            }
+
+            ILaunchConfiguration config = workingCopy.doSave();
+            final CountDownLatch latch = new CountDownLatch(1);
+
+            TestRunListener listener = new TestRunListener() {
+                @Override
+                public void sessionLaunched(ITestRunSession testSession) {
+                    if (!testSession.getTestRunName().equals(configName)) return;
+                    McpLogger.debug(LOG_TAG, "Session launched: " + session.getTaskId());
+                }
+
+                @Override
+                public void sessionStarted(ITestRunSession testSession) {
+                    if (!testSession.getTestRunName().equals(configName)) return;
+                    McpLogger.debug(LOG_TAG, "Session started: " + session.getTaskId());
+                }
+
+                @Override
+                public void sessionFinished(ITestRunSession testSession) {
+                    if (!testSession.getTestRunName().equals(configName)) return;
+                    McpLogger.info(LOG_TAG, "Session finished: " + session.getTaskId() +
+                            " - Passed: " + session.getTestsPassed() + ", Failed: " + session.getTestsFailed());
+
+                    // Build final result JSON
+                    try {
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("status", session.getTestsFailed() > 0 || session.getTestsError() > 0 ? "FAILED" : "SUCCESS");
+                        result.put("projectName", session.getProjectName());
+                        result.put("className", session.getClassName());
+                        result.put("testsRun", session.getTestsRun());
+                        result.put("passed", session.getTestsPassed());
+                        result.put("failures", session.getTestsFailed());
+                        result.put("errors", session.getTestsError());
+                        result.put("testResults", session.getTestResults());
+                        result.put("durationSeconds", session.getElapsedSeconds());
+                        session.setResultJson(MAPPER.writeValueAsString(result));
+                    } catch (Exception e) {
+                        McpLogger.error(LOG_TAG, "Error building result JSON", e);
+                    }
+
+                    session.complete(AsyncTestRegistry.TestSession.Status.COMPLETED);
+                    latch.countDown();
+                }
+
+                @Override
+                public void testCaseFinished(ITestCaseElement testCaseElement) {
+                    if (!testCaseElement.getTestRunSession().getTestRunName().equals(configName)) return;
+
+                    session.incrementTestsRun();
+                    ITestElement.Result result = testCaseElement.getTestResult(false);
+
+                    if (result == ITestElement.Result.OK) {
+                        session.incrementTestsPassed();
+                    } else if (result == ITestElement.Result.FAILURE) {
+                        session.incrementTestsFailed();
+                    } else if (result == ITestElement.Result.ERROR) {
+                        session.incrementTestsError();
+                    }
+
+                    session.setCurrentTest(testCaseElement.getTestMethodName());
+
+                    // Store test result details
+                    Map<String, Object> testResult = new HashMap<>();
+                    testResult.put("className", testCaseElement.getTestClassName());
+                    testResult.put("methodName", testCaseElement.getTestMethodName());
+                    testResult.put("status", result.toString());
+                    testResult.put("duration", testCaseElement.getElapsedTimeInSeconds());
+
+                    if (result == ITestElement.Result.FAILURE || result == ITestElement.Result.ERROR) {
+                        String trace = testCaseElement.getFailureTrace() != null
+                                ? testCaseElement.getFailureTrace().getTrace() : null;
+                        if (trace != null) {
+                            testResult.put("failureTrace", truncateStackTrace(trace, session.getClassName(), 2000));
+                        }
+                    }
+                    session.addTestResult(testResult);
+
+                    McpLogger.debug(LOG_TAG, "Test finished: " + testCaseElement.getTestMethodName() + " = " + result);
+                }
+            };
+
+            JUnitCore.addTestRunListener(listener);
+
+            try {
+                ILaunch launch = config.launch(ILaunchManager.RUN_MODE, null, true);
+
+                // Wait for completion with timeout
+                boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
+
+                if (!completed) {
+                    McpLogger.warn(LOG_TAG, "Test timeout: " + session.getTaskId());
+                    session.setErrorMessage("Test execution timed out after " + timeoutSeconds + "s");
+                    session.complete(AsyncTestRegistry.TestSession.Status.TIMEOUT);
+
+                    // Try to terminate the launch
+                    if (launch != null && !launch.isTerminated()) {
+                        launch.terminate();
+                    }
+                }
+            } finally {
+                JUnitCore.removeTestRunListener(listener);
+                // Clean up launch config
+                try {
+                    config.delete();
+                } catch (Exception e) {
+                    McpLogger.warn(LOG_TAG, "Failed to delete launch config: " + e.getMessage());
+                }
+            }
+
+        } catch (Exception e) {
+            McpLogger.error(LOG_TAG, "Error running async test", e);
+            session.setErrorMessage("Error: " + e.getMessage());
+            session.complete(AsyncTestRegistry.TestSession.Status.ERROR);
+        }
+    }
+
+    private static CallToolResult getTestResult(String taskId) {
+        final String LOG_TAG = "AsyncTests";
+
+        AsyncTestRegistry.TestSession session = AsyncTestRegistry.getInstance().get(taskId);
+        if (session == null) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "NOT_FOUND");
+            error.put("message", "No test session found with taskId: " + taskId);
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception e) {
+                return new CallToolResult("{\"status\":\"NOT_FOUND\"}", true);
+            }
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("taskId", taskId);
+        response.put("status", session.getStatus().name());
+        response.put("elapsedSeconds", session.getElapsedSeconds());
+        response.put("testsRun", session.getTestsRun());
+        response.put("expectedTotal", session.getExpectedTotal());
+        response.put("passed", session.getTestsPassed());
+        response.put("failed", session.getTestsFailed());
+        response.put("errors", session.getTestsError());
+
+        if (session.getCurrentTest() != null) {
+            response.put("currentTest", session.getCurrentTest());
+        }
+
+        if (session.isCompleted()) {
+            if (session.getErrorMessage() != null) {
+                response.put("errorMessage", session.getErrorMessage());
+            }
+            if (session.getResultJson() != null) {
+                response.put("results", session.getTestResults());
+            }
+            // Clean up after retrieval (keep for 10 min in case of re-fetch)
+            AsyncTestRegistry.getInstance().cleanupOldSessions();
+        } else {
+            response.put("message", "Test still running. Call again in 30s.");
+        }
+
+        try {
+            McpLogger.debug(LOG_TAG, "getTestResult(" + taskId + "): " + session.getStatus() +
+                    " - " + session.getTestsRun() + "/" + session.getExpectedTotal());
+            return new CallToolResult(MAPPER.writeValueAsString(response), false);
+        } catch (Exception e) {
+            return new CallToolResult("{\"status\":\"" + session.getStatus() + "\"}", false);
         }
     }
 }
