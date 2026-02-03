@@ -698,6 +698,8 @@ public class ExecutionTools {
                 "WHY USE THIS: Uses project's Java version automatically, no Maven configuration needed, " +
                 "returns structured JSON with test results including failures with file paths and line numbers. " +
                 "Works for both unit tests (*Test) and integration tests (*IT) - no distinction needed. " +
+                "⚠️ HARD LIMIT: MCP client timeout is 60s - use jdt_start_tests_async for tests >30s! " +
+                "The timeoutSeconds parameter does NOT override this limit. " +
                 "WORKFLOW TIP: Use jdt_list_tests first to discover available tests.",
                 schema,
                 null);
@@ -1359,8 +1361,9 @@ public class ExecutionTools {
 
         Tool tool = new Tool(
                 "jdt_start_tests_async",
-                "🚀 START LONG-RUNNING TESTS! Use this instead of jdt_run_tests for integration tests " +
-                "(Spring Boot, Testcontainers) that take >30s. Returns a taskId immediately. " +
+                "🚀 START A LONG-RUNNING TEST! Use this instead of jdt_run_tests for a single integration test " +
+                "(Spring Boot, Testcontainers) that takes >30s. Returns a taskId immediately. " +
+                "⚠️ FOR ONE TEST AT A TIME - NOT for parallel execution of multiple tests! " +
                 "Then call jdt_get_test_result(taskId) to check progress/results. " +
                 "WORKFLOW: 1) jdt_start_tests_async → taskId  2) wait 30s  3) jdt_get_test_result(taskId) → repeat until done",
                 schema,
