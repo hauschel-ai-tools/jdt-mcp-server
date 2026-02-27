@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Node.js for Forgejo Actions (actions/checkout etc.)
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs jq && \
     rm -rf /var/lib/apt/lists/*
 
 RUN node --version && npm --version && mvn --version
