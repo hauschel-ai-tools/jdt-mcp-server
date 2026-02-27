@@ -23,9 +23,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download dependencies
-        run: mvn -B dependency:copy-dependencies -DoutputDirectory=org.naturzukunft.jdt.mcp/lib -f org.naturzukunft.jdt.mcp/pom.xml
-
       - name: Build and package
         run: mvn -B --no-transfer-progress clean package
 
