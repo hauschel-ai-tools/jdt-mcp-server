@@ -48,7 +48,7 @@ jobs:
     if: startsWith(forgejo.ref, 'refs/tags/v')
     runs-on: main
     container:
-      image: node:20-slim
+      image: registry.cg.internal/ci/jdt-mcp-maven:latest
     steps:
       - name: Download archives
         uses: actions/download-artifact@v3
