@@ -15,6 +15,7 @@ buildNumber.properties
 # Eclipse
 .metadata
 bin/
+!org.naturzukunft.jdt.mcp.product/bin/
 tmp/
 *.tmp
 *.bak

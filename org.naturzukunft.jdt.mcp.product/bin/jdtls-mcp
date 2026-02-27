@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# JDT MCP Server - Standalone launcher
+# Starts the Eclipse JDT MCP server for use with AI coding assistants.
+#
+# Usage:
+#   jdtls-mcp              # stdio mode (default, for Claude Code)
+#   jdtls-mcp --http       # HTTP/SSE mode (for debugging)
+#
+# Environment variables:
+#   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: /tmp/jdtls-mcp-<pid>)
+#   JDTMCP_TRANSPORT  - Transport: stdio or http (default: stdio)
+#   JAVA_HOME         - Java installation to use
+#
+
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Parse arguments
+TRANSPORT="${JDTMCP_TRANSPORT:-stdio}"
+for arg in "$@"; do
+    case "$arg" in
+        --http) TRANSPORT="http" ;;
+    esac
+done
+
+# Workspace directory
+WORKSPACE="${JDTMCP_WORKSPACE:-/tmp/jdtls-mcp-$$}"
+
+# Find Java
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    JAVA="$JAVA_HOME/bin/java"
+else
+    JAVA="java"
+fi
+
+# Find Equinox launcher
+LAUNCHER=$(ls "$BASEDIR"/plugins/org.eclipse.equinox.launcher_*.jar 2>/dev/null | head -1)
+if [ -z "$LAUNCHER" ]; then
+    echo "ERROR: Equinox launcher not found in $BASEDIR/plugins/" >&2
+    exit 1
+fi
+
+exec "$JAVA" \
+    -Djdtmcp.headless=true \
+    -Djdtmcp.transport="$TRANSPORT" \
+    -Dosgi.bundles.defaultStartLevel=4 \
+    -Declipse.application=org.naturzukunft.jdt.mcp.headless \
+    -jar "$LAUNCHER" \
+    -configuration "$BASEDIR/configuration" \
+    -data "$WORKSPACE" \
+    -nosplash \
+    "$@"
