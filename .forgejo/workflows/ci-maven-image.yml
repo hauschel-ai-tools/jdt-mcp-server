@@ -2,6 +2,9 @@ name: Build CI Maven image
 
 on:
   push:
+    branches:
+      - main
+      - feature/**
     paths:
       - 'ci/ci-maven.Dockerfile'
       - '.forgejo/workflows/ci-maven-image.yml'
