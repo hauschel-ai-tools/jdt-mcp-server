@@ -50,6 +50,8 @@ jobs:
     needs: build
     if: startsWith(forgejo.ref, 'refs/tags/v')
     runs-on: main
+    container:
+      image: node:20-slim
     steps:
       - name: Download archives
         uses: actions/download-artifact@v3
