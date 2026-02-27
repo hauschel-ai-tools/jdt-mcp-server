@@ -4,10 +4,9 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.Map;
 
-import org.eclipse.jface.preference.IPreferenceStore;
-import org.naturzukunft.jdt.mcp.preferences.McpPreferenceConstants;
 import org.naturzukunft.jdt.mcp.server.McpHttpServer;
 import org.naturzukunft.jdt.mcp.server.McpProtocolHandler;
+import org.naturzukunft.jdt.mcp.server.McpStdioServer;
 import org.naturzukunft.jdt.mcp.tools.CodeAnalysisTools;
 import org.naturzukunft.jdt.mcp.tools.CodeGenerationTools;
 import org.naturzukunft.jdt.mcp.tools.CodeQualityTools;
@@ -28,127 +27,136 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
  */
 public class McpServerManager {
 
+    private static final int DEFAULT_PORT_START = 51000;
+    private static final int DEFAULT_PORT_END = 51100;
+
     private int port;
     private boolean running = false;
+    private String transport;
     private McpHttpServer httpServer;
+    private McpStdioServer stdioServer;
     private McpProtocolHandler protocolHandler;
-
-    // Tool registrations
     private ToolRegistration[] tools;
 
     /**
-     * Starts the MCP server on an available port.
+     * Starts the MCP server with the configured transport.
+     * Transport is determined by system property {@code jdtmcp.transport} (default: stdio).
      */
     public void start() {
         if (running) {
-            System.out.println("[JDT MCP] Server already running on port " + port);
+            McpLogger.info("ServerManager", "Server already running");
             return;
         }
 
         try {
-            // Get port range from preferences
-            IPreferenceStore store = Activator.getDefault().getPreferenceStore();
-            int portStart = store.getInt(McpPreferenceConstants.PREF_PORT_START);
-            int portEnd = store.getInt(McpPreferenceConstants.PREF_PORT_END);
-
-            // Find available port
-            port = findAvailablePort(portStart, portEnd);
+            transport = System.getProperty("jdtmcp.transport", "stdio");
 
             // Create protocol handler
             protocolHandler = new McpProtocolHandler();
 
             // Register all tools
-            tools = new ToolRegistration[] {
-                // Code Analysis Tools
-                CodeAnalysisTools.parseJavaFileTool(),
-                CodeAnalysisTools.getTypeHierarchyTool(),
-                CodeAnalysisTools.findReferencesTool(),
-                CodeAnalysisTools.getSourceRangeTool(),
-
-                // Navigation Tools
-                NavigationTools.findTypeTool(),
-                NavigationTools.getMethodSignatureTool(),
-                NavigationTools.findImplementationsTool(),
-                NavigationTools.findCallersTool(),
-
-                // Project Info Tools
-                ProjectInfoTools.listProjectsTool(),
-                ProjectInfoTools.getClasspathTool(),
-                ProjectInfoTools.getCompilationErrorsTool(),
-                ProjectInfoTools.getProjectStructureTool(),
-                ProjectInfoTools.refreshProjectTool(),
-
-                // Creation Tools
-                CreationTools.createClassTool(),
-                CreationTools.createInterfaceTool(),
-                CreationTools.createEnumTool(),
-
-                // Code Generation Tools
-                CodeGenerationTools.addMethodTool(),
-                CodeGenerationTools.addFieldTool(),
-                CodeGenerationTools.addImportTool(),
-                CodeGenerationTools.implementInterfaceTool(),
-                CodeGenerationTools.generateGettersSettersTool(),
-                CodeGenerationTools.generateConstructorTool(),
-                CodeGenerationTools.generateEqualsHashCodeTool(),
-                CodeGenerationTools.generateToStringTool(),
-                CodeGenerationTools.generateDelegateMethodsTool(),
-
-                // Refactoring Tools
-                RefactoringTools.renameElementTool(),
-                RefactoringTools.extractMethodTool(),
-                RefactoringTools.moveTypeTool(),
-                RefactoringTools.organizeImportsTool(),
-                RefactoringTools.inlineTool(),
-                RefactoringTools.extractInterfaceTool(),
-                RefactoringTools.changeMethodSignatureTool(),
-                RefactoringTools.convertToLambdaTool(),
-                RefactoringTools.encapsulateFieldTool(),
-                RefactoringTools.introduceParameterTool(),
-
-                // Execution Tools
-                ExecutionTools.mavenBuildTool(),
-                ExecutionTools.runMainTool(),
-                ExecutionTools.listTestsTool(),
-                ExecutionTools.runTestsTool(),
-                ExecutionTools.startTestsAsyncTool(),
-                ExecutionTools.getTestResultTool(),
-
-                // Documentation Tools
-                DocumentationTools.getJavadocTool(),
-                DocumentationTools.getAnnotationsTool(),
-                DocumentationTools.findAnnotatedElementsTool(),
-                DocumentationTools.generateJavadocTool(),
-
-                // Code Quality Tools
-                CodeQualityTools.quickFixTool(),
-                CodeQualityTools.findUnusedCodeTool(),
-                CodeQualityTools.findDeadCodeTool()
-            };
-
-            // Register tools with protocol handler
+            tools = createToolRegistrations();
             protocolHandler.registerTools(tools);
 
-            // Create and start HTTP server
-            httpServer = new McpHttpServer(port, protocolHandler);
-
-            // Connect progress sender
-            protocolHandler.setProgressSender(httpServer);
-
-            httpServer.start();
-
-            running = true;
-            System.out.println("[JDT MCP] Server started successfully");
-            System.out.println("[JDT MCP] Registered " + tools.length + " tools:");
-            for (ToolRegistration tool : tools) {
-                System.out.println("[JDT MCP]   - " + tool.tool().name());
+            // Start the appropriate transport
+            if ("stdio".equals(transport)) {
+                startStdioTransport();
+            } else {
+                startHttpTransport();
             }
 
+            running = true;
+            McpLogger.info("ServerManager", "Server started (" + transport + ") with " + tools.length + " tools");
+
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Failed to start server: " + e.getMessage());
-            e.printStackTrace();
+            McpLogger.error("ServerManager", "Failed to start server", e);
             running = false;
         }
+    }
+
+    private void startStdioTransport() {
+        stdioServer = new McpStdioServer(protocolHandler);
+        protocolHandler.setProgressSender(stdioServer);
+        stdioServer.start();
+    }
+
+    private void startHttpTransport() throws Exception {
+        int portStart = Integer.getInteger("jdtmcp.port.start", DEFAULT_PORT_START);
+        int portEnd = Integer.getInteger("jdtmcp.port.end", DEFAULT_PORT_END);
+        port = findAvailablePort(portStart, portEnd);
+
+        httpServer = new McpHttpServer(port, protocolHandler);
+        protocolHandler.setProgressSender(httpServer);
+        httpServer.start();
+    }
+
+    private ToolRegistration[] createToolRegistrations() {
+        return new ToolRegistration[] {
+            // Code Analysis Tools
+            CodeAnalysisTools.parseJavaFileTool(),
+            CodeAnalysisTools.getTypeHierarchyTool(),
+            CodeAnalysisTools.findReferencesTool(),
+            CodeAnalysisTools.getSourceRangeTool(),
+
+            // Navigation Tools
+            NavigationTools.findTypeTool(),
+            NavigationTools.getMethodSignatureTool(),
+            NavigationTools.findImplementationsTool(),
+            NavigationTools.findCallersTool(),
+
+            // Project Info Tools
+            ProjectInfoTools.listProjectsTool(),
+            ProjectInfoTools.getClasspathTool(),
+            ProjectInfoTools.getCompilationErrorsTool(),
+            ProjectInfoTools.getProjectStructureTool(),
+            ProjectInfoTools.refreshProjectTool(),
+
+            // Creation Tools
+            CreationTools.createClassTool(),
+            CreationTools.createInterfaceTool(),
+            CreationTools.createEnumTool(),
+
+            // Code Generation Tools
+            CodeGenerationTools.addMethodTool(),
+            CodeGenerationTools.addFieldTool(),
+            CodeGenerationTools.addImportTool(),
+            CodeGenerationTools.implementInterfaceTool(),
+            CodeGenerationTools.generateGettersSettersTool(),
+            CodeGenerationTools.generateConstructorTool(),
+            CodeGenerationTools.generateEqualsHashCodeTool(),
+            CodeGenerationTools.generateToStringTool(),
+            CodeGenerationTools.generateDelegateMethodsTool(),
+
+            // Refactoring Tools
+            RefactoringTools.renameElementTool(),
+            RefactoringTools.extractMethodTool(),
+            RefactoringTools.moveTypeTool(),
+            RefactoringTools.organizeImportsTool(),
+            RefactoringTools.inlineTool(),
+            RefactoringTools.extractInterfaceTool(),
+            RefactoringTools.changeMethodSignatureTool(),
+            RefactoringTools.convertToLambdaTool(),
+            RefactoringTools.encapsulateFieldTool(),
+            RefactoringTools.introduceParameterTool(),
+
+            // Execution Tools
+            ExecutionTools.mavenBuildTool(),
+            ExecutionTools.runMainTool(),
+            ExecutionTools.listTestsTool(),
+            ExecutionTools.runTestsTool(),
+            ExecutionTools.startTestsAsyncTool(),
+            ExecutionTools.getTestResultTool(),
+
+            // Documentation Tools
+            DocumentationTools.getJavadocTool(),
+            DocumentationTools.getAnnotationsTool(),
+            DocumentationTools.findAnnotatedElementsTool(),
+            DocumentationTools.generateJavadocTool(),
+
+            // Code Quality Tools
+            CodeQualityTools.findUnusedCodeTool(),
+            CodeQualityTools.findDeadCodeTool()
+        };
     }
 
     /**
@@ -163,10 +171,13 @@ public class McpServerManager {
             if (httpServer != null) {
                 httpServer.stop();
             }
+            if (stdioServer != null) {
+                stdioServer.stop();
+            }
             running = false;
-            System.out.println("[JDT MCP] Server stopped");
+            McpLogger.info("ServerManager", "Server stopped");
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error stopping server: " + e.getMessage());
+            McpLogger.error("ServerManager", "Error stopping server", e);
         }
     }
 
@@ -178,21 +189,35 @@ public class McpServerManager {
     }
 
     /**
-     * Returns the port the server is running on.
+     * Returns the configured transport ("stdio" or "http").
+     */
+    public String getTransport() {
+        return transport;
+    }
+
+    /**
+     * Returns the port the server is running on (HTTP mode only).
      */
     public int getPort() {
         return port;
     }
 
     /**
-     * Get registered tools (for testing/debugging).
+     * Returns the stdio server (stdio mode only).
+     */
+    public McpStdioServer getStdioServer() {
+        return stdioServer;
+    }
+
+    /**
+     * Get registered tools.
      */
     public ToolRegistration[] getTools() {
         return tools;
     }
 
     /**
-     * Get the SSE endpoint URL.
+     * Get the SSE endpoint URL (HTTP mode only).
      */
     public String getSseEndpoint() {
         return "http://localhost:" + port + "/sse";

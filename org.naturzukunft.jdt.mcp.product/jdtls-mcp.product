@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?pde version="3.5"?>
+
+<product
+      name="JDT MCP Server"
+      uid="jdtls-mcp"
+      id="org.naturzukunft.jdt.mcp.product"
+      application="org.naturzukunft.jdt.mcp.headless"
+      version="1.0.0"
+      useFeatures="true"
+      includeLaunchers="false">
+
+   <configIni use="default">
+   </configIni>
+
+   <launcherArgs>
+      <vmArgs>-Djdtmcp.headless=true -Djdtmcp.transport=stdio</vmArgs>
+   </launcherArgs>
+
+   <features>
+      <feature id="org.naturzukunft.jdt.mcp.feature"/>
+      <feature id="org.eclipse.jdt"/>
+      <feature id="org.eclipse.platform"/>
+   </features>
+
+   <configurations>
+      <plugin id="org.eclipse.equinox.simpleconfigurator" autoStart="true" startLevel="1" />
+      <plugin id="org.eclipse.equinox.common" autoStart="true" startLevel="2" />
+      <plugin id="org.apache.felix.scr" autoStart="true" startLevel="2" />
+      <plugin id="org.eclipse.equinox.event" autoStart="true" startLevel="2" />
+      <plugin id="org.eclipse.core.runtime" autoStart="true" startLevel="4" />
+      <plugin id="org.eclipse.equinox.app" autoStart="true" startLevel="4" />
+      <plugin id="org.naturzukunft.jdt.mcp" autoStart="true" startLevel="4" />
+   </configurations>
+
+</product>

@@ -76,7 +76,7 @@ public class ExecutionTools {
         // 1. Check for Maven Wrapper in project directory
         File mvnw = new File(projectDir, wrapperExecutable);
         if (mvnw.exists() && mvnw.canExecute()) {
-            System.out.println("[JDT MCP] Using Maven Wrapper: " + mvnw.getAbsolutePath());
+            System.err.println("[JDT MCP] Using Maven Wrapper: " + mvnw.getAbsolutePath());
             return mvnw.getAbsolutePath();
         }
 
@@ -85,7 +85,7 @@ public class ExecutionTools {
         if (m2Home != null && !m2Home.isEmpty()) {
             File m2Maven = new File(m2Home, "bin/" + mvnExecutable);
             if (m2Maven.exists() && m2Maven.canExecute()) {
-                System.out.println("[JDT MCP] Using M2_HOME Maven: " + m2Maven.getAbsolutePath());
+                System.err.println("[JDT MCP] Using M2_HOME Maven: " + m2Maven.getAbsolutePath());
                 return m2Maven.getAbsolutePath();
             }
         }
@@ -95,7 +95,7 @@ public class ExecutionTools {
         if (mavenHome != null && !mavenHome.isEmpty()) {
             File mavenHomeMvn = new File(mavenHome, "bin/" + mvnExecutable);
             if (mavenHomeMvn.exists() && mavenHomeMvn.canExecute()) {
-                System.out.println("[JDT MCP] Using MAVEN_HOME Maven: " + mavenHomeMvn.getAbsolutePath());
+                System.err.println("[JDT MCP] Using MAVEN_HOME Maven: " + mavenHomeMvn.getAbsolutePath());
                 return mavenHomeMvn.getAbsolutePath();
             }
         }
@@ -105,13 +105,13 @@ public class ExecutionTools {
         if (userHome != null) {
             File sdkmanMaven = new File(userHome, ".sdkman/candidates/maven/current/bin/" + mvnExecutable);
             if (sdkmanMaven.exists() && sdkmanMaven.canExecute()) {
-                System.out.println("[JDT MCP] Using SDKMAN Maven: " + sdkmanMaven.getAbsolutePath());
+                System.err.println("[JDT MCP] Using SDKMAN Maven: " + sdkmanMaven.getAbsolutePath());
                 return sdkmanMaven.getAbsolutePath();
             }
         }
 
         // 5. Fallback to global 'mvn' command
-        System.out.println("[JDT MCP] Using global Maven command: mvn");
+        System.err.println("[JDT MCP] Using global Maven command: mvn");
         return "mvn";
     }
 
@@ -143,7 +143,7 @@ public class ExecutionTools {
                         if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + ".")) {
                             File javaExe = new File(candidate, "bin/java");
                             if (javaExe.exists()) {
-                                System.out.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                System.err.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
                                 return candidate.getAbsolutePath();
                             }
                         }
@@ -153,7 +153,7 @@ public class ExecutionTools {
                         if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + "-")) {
                             File javaExe = new File(candidate, "bin/java");
                             if (javaExe.exists()) {
-                                System.out.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                System.err.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
                                 return candidate.getAbsolutePath();
                             }
                         }
@@ -173,7 +173,7 @@ public class ExecutionTools {
                          jvm.getName().contains("jdk-" + javaVersion))) {
                         File javaExe = new File(jvm, "bin/java");
                         if (javaExe.exists()) {
-                            System.out.println("[JDT MCP] Using system Java " + javaVersion + ": " + jvm.getAbsolutePath());
+                            System.err.println("[JDT MCP] Using system Java " + javaVersion + ": " + jvm.getAbsolutePath());
                             return jvm.getAbsolutePath();
                         }
                     }
@@ -182,7 +182,7 @@ public class ExecutionTools {
         }
 
         // 3. No specific version found
-        System.out.println("[JDT MCP] Java " + javaVersion + " not found, using system default");
+        System.err.println("[JDT MCP] Java " + javaVersion + " not found, using system default");
         return null;
     }
 
@@ -202,12 +202,12 @@ public class ExecutionTools {
                     if (javaHome != null) {
                         Map<String, String> env = pb.environment();
                         env.put("JAVA_HOME", javaHome);
-                        System.out.println("[JDT MCP] Set JAVA_HOME=" + javaHome + " for project Java " + javaVersion);
+                        System.err.println("[JDT MCP] Set JAVA_HOME=" + javaHome + " for project Java " + javaVersion);
                     }
                 }
             }
         } catch (Exception e) {
-            System.out.println("[JDT MCP] Could not configure Java environment: " + e.getMessage());
+            System.err.println("[JDT MCP] Could not configure Java environment: " + e.getMessage());
         }
     }
 
@@ -297,7 +297,7 @@ public class ExecutionTools {
             command.add("-f");
             command.add(project.getLocation().toString() + "/pom.xml");
 
-            System.out.println("[JDT MCP] Running Maven: " + String.join(" ", command));
+            System.err.println("[JDT MCP] Running Maven: " + String.join(" ", command));
 
             // Execute
             ProcessBuilder pb = new ProcessBuilder(command);
@@ -472,7 +472,7 @@ public class ExecutionTools {
                 }
             }
 
-            System.out.println("[JDT MCP] Running: " + String.join(" ", command));
+            System.err.println("[JDT MCP] Running: " + String.join(" ", command));
 
             // Execute
             ProcessBuilder pb = new ProcessBuilder(command);

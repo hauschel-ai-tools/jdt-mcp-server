@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.naturzukunft.jdt</groupId>
+        <artifactId>jdt-mcp-server-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>org.naturzukunft.jdt.mcp.product</artifactId>
+    <packaging>eclipse-repository</packaging>
+
+    <name>Eclipse JDT MCP Server - Product</name>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.eclipse.tycho</groupId>
+                <artifactId>tycho-p2-repository-plugin</artifactId>
+                <version>${tycho.version}</version>
+                <configuration>
+                    <includeAllDependencies>true</includeAllDependencies>
+                </configuration>
+            </plugin>
+
+            <!-- 1. Materialize product in prepare-package phase -->
+            <plugin>
+                <groupId>org.eclipse.tycho</groupId>
+                <artifactId>tycho-p2-director-plugin</artifactId>
+                <version>${tycho.version}</version>
+                <executions>
+                    <execution>
+                        <id>materialize-products</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>materialize-products</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>archive-products</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>archive-products</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <products>
+                        <product>
+                            <id>jdtls-mcp</id>
+                        </product>
+                    </products>
+                </configuration>
+            </plugin>
+
+            <!-- 2. Copy launcher script into materialized products (between materialize and archive) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-launcher-scripts</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy todir="${project.build.directory}/products/jdtls-mcp/linux/gtk/x86_64/bin">
+                                    <fileset dir="${project.basedir}/bin"/>
+                                </copy>
+                                <chmod file="${project.build.directory}/products/jdtls-mcp/linux/gtk/x86_64/bin/jdtls-mcp" perm="755"/>
+                                <copy todir="${project.build.directory}/products/jdtls-mcp/macosx/cocoa/x86_64/bin">
+                                    <fileset dir="${project.basedir}/bin"/>
+                                </copy>
+                                <chmod file="${project.build.directory}/products/jdtls-mcp/macosx/cocoa/x86_64/bin/jdtls-mcp" perm="755"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

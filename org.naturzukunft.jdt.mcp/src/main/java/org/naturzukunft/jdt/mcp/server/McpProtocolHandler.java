@@ -76,6 +76,13 @@ public class McpProtocolHandler {
             String method = request.path("method").asText();
             JsonNode params = request.get("params");
 
+            // Notifications (no id) that we don't need to handle - just ignore
+            boolean isNotification = idNode == null || idNode.isNull();
+            if (isNotification && method.startsWith("notifications/")) {
+                McpLogger.debug("Protocol", "Received notification: " + method);
+                return null;
+            }
+
             // Handle method
             Object result = switch (method) {
                 case "initialize" -> handleInitialize(params);
@@ -87,7 +94,7 @@ public class McpProtocolHandler {
             };
 
             // For notifications (no id), don't send response
-            if (idNode == null || idNode.isNull()) {
+            if (isNotification) {
                 return null;
             }
 
@@ -96,8 +103,7 @@ public class McpProtocolHandler {
         } catch (McpException e) {
             return createErrorResponse(null, e.getCode(), e.getMessage());
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error handling message: " + e.getMessage());
-            e.printStackTrace();
+            McpLogger.error("Protocol", "Error handling message: " + e.getMessage(), e);
             return createErrorResponse(null, -32603, "Internal error: " + e.getMessage());
         }
     }
@@ -127,7 +133,7 @@ public class McpProtocolHandler {
 
         result.put("capabilities", capabilities);
 
-        System.out.println("[JDT MCP] Client initialized");
+        McpLogger.info("Protocol", "Client initialized");
         return result;
     }
 
@@ -135,7 +141,7 @@ public class McpProtocolHandler {
      * Handle initialized notification.
      */
     private Object handleInitialized(JsonNode params) {
-        System.out.println("[JDT MCP] Client initialization complete");
+        McpLogger.info("Protocol", "Client initialization complete");
         return null; // Notification, no response
     }
 

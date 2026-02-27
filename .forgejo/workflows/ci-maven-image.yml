@@ -1,0 +1,29 @@
+name: Build CI Maven image
+
+on:
+  push:
+    paths:
+      - 'ci/ci-maven.Dockerfile'
+      - '.forgejo/workflows/ci-maven-image.yml'
+  workflow_dispatch:
+
+env:
+  image: registry.cg.internal/ci/jdt-mcp-maven:latest
+
+jobs:
+  build:
+    runs-on: main
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install docker
+        run: apk add docker
+
+      - name: Build docker image
+        working-directory: ci
+        run: docker build -t $image -f ci-maven.Dockerfile .
+
+      - name: Push docker image to registry
+        run: docker push $image

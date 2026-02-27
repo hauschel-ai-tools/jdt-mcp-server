@@ -18,6 +18,7 @@
         <module>org.naturzukunft.jdt.mcp</module>
         <module>org.naturzukunft.jdt.mcp.feature</module>
         <module>org.naturzukunft.jdt.mcp.site</module>
+        <module>org.naturzukunft.jdt.mcp.product</module>
     </modules>
 
     <properties>

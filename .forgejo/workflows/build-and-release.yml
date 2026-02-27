@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - feature/**
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: main
+    container:
+      image: registry.cg.internal/ci/jdt-mcp-maven:latest
+    env:
+      MAVEN_OPTS: >-
+        -Djdk.xml.maxGeneralEntitySizeLimit=0
+        -Djdk.xml.entityExpansionLimit=0
+        -Djdk.xml.totalEntitySizeLimit=0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download dependencies
+        run: mvn -B dependency:copy-dependencies -DoutputDirectory=org.naturzukunft.jdt.mcp/lib -f org.naturzukunft.jdt.mcp/pom.xml
+
+      - name: Build and package
+        run: mvn -B --no-transfer-progress clean package
+
+      - name: Install test dependencies
+        run: apt-get update -qq && apt-get install -y -qq jq > /dev/null
+
+      - name: Run smoke tests
+        run: tests/smoke-test.sh
+        timeout-minutes: 5
+
+      - name: Upload archives
+        if: startsWith(forgejo.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-archives
+          path: |
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip
+
+  release:
+    needs: build
+    if: startsWith(forgejo.ref, 'refs/tags/v')
+    runs-on: main
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v3
+        with:
+          name: release-archives
+
+      - name: Create release
+        uses: actions/forgejo-release@v2
+        with:
+          direction: upload
+          tag: ${{ forgejo.ref_name }}
+          title: "JDT MCP Server ${{ forgejo.ref_name }}"
+          release-notes: |
+            ## Installation
+
+            ```bash
+            curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+            ```
+
+            Oder manuell: Archiv für dein OS herunterladen, entpacken, fertig.
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          release-dir: ./

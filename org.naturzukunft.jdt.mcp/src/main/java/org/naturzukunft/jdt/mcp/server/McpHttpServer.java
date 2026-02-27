@@ -62,10 +62,10 @@ public class McpHttpServer implements ProgressNotificationSender {
      */
     public void start() throws Exception {
         server.start();
-        System.out.println("[JDT MCP] HTTP Server started on port " + port);
-        System.out.println("[JDT MCP] MCP HTTP endpoint: http://localhost:" + port + "/mcp (recommended)");
-        System.out.println("[JDT MCP] SSE endpoint: http://localhost:" + port + "/sse");
-        System.out.println("[JDT MCP] Message endpoint: http://localhost:" + port + "/message");
+        System.err.println("[JDT MCP] HTTP Server started on port " + port);
+        System.err.println("[JDT MCP] MCP HTTP endpoint: http://localhost:" + port + "/mcp (recommended)");
+        System.err.println("[JDT MCP] SSE endpoint: http://localhost:" + port + "/sse");
+        System.err.println("[JDT MCP] Message endpoint: http://localhost:" + port + "/message");
     }
 
     /**
@@ -79,7 +79,7 @@ public class McpHttpServer implements ProgressNotificationSender {
         sseConnections.clear();
 
         server.stop();
-        System.out.println("[JDT MCP] HTTP Server stopped");
+        System.err.println("[JDT MCP] HTTP Server stopped");
     }
 
     /**
@@ -154,12 +154,12 @@ public class McpHttpServer implements ProgressNotificationSender {
             }
 
             String requestJson = body.toString();
-            System.out.println("[JDT MCP] HTTP Request: " + requestJson);
+            System.err.println("[JDT MCP] HTTP Request: " + requestJson);
 
             // Process the message
             String responseJson = protocolHandler.handleMessage(requestJson);
 
-            System.out.println("[JDT MCP] HTTP Response: " + responseJson);
+            System.err.println("[JDT MCP] HTTP Response: " + responseJson);
 
             // Return response
             resp.setStatus(HttpServletResponse.SC_OK);
@@ -213,7 +213,7 @@ public class McpHttpServer implements ProgressNotificationSender {
             SseConnection connection = new SseConnection(connectionId, asyncContext);
             sseConnections.put(connectionId, connection);
 
-            System.out.println("[JDT MCP] SSE connection established: " + connectionId);
+            System.err.println("[JDT MCP] SSE connection established: " + connectionId);
 
             // Send endpoint event with message URL (relative path like Spring Tools MCP)
             String messageUrl = "/message?sessionId=" + connectionId;
@@ -224,7 +224,7 @@ public class McpHttpServer implements ProgressNotificationSender {
                 @Override
                 public void onComplete(jakarta.servlet.AsyncEvent event) {
                     sseConnections.remove(connectionId);
-                    System.out.println("[JDT MCP] SSE connection closed: " + connectionId);
+                    System.err.println("[JDT MCP] SSE connection closed: " + connectionId);
                 }
 
                 @Override
@@ -283,7 +283,7 @@ public class McpHttpServer implements ProgressNotificationSender {
             }
 
             String requestJson = body.toString();
-            System.out.println("[JDT MCP] Received message: " + requestJson);
+            System.err.println("[JDT MCP] Received message: " + requestJson);
 
             // Process the message
             String responseJson = protocolHandler.handleMessage(requestJson);

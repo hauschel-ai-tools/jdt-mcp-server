@@ -120,8 +120,8 @@ public class McpLogger {
         String logLine = String.format("[%s] [%s] [%s] [%s] %s%n",
                 timestamp, level, threadName, component, message);
 
-        // Also print to console for immediate visibility
-        System.out.print("[JDT MCP] " + logLine);
+        // Print to stderr (stdout is reserved for MCP protocol in stdio mode)
+        System.err.print("[JDT MCP] " + logLine);
 
         // Write to file
         synchronized (McpLogger.class) {

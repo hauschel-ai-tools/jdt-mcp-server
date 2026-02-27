@@ -5,14 +5,11 @@ Bundle-SymbolicName: org.naturzukunft.jdt.mcp;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.naturzukunft.jdt.mcp.Activator
 Bundle-Vendor: naturzukunft
-Require-Bundle: org.eclipse.ui,
- org.eclipse.core.runtime,
+Require-Bundle: org.eclipse.core.runtime,
  org.eclipse.core.resources,
  org.eclipse.jdt.core,
- org.eclipse.jface,
  org.eclipse.text,
  org.eclipse.ltk.core.refactoring,
- org.eclipse.jdt.ui,
  org.eclipse.jdt.core.manipulation,
  org.eclipse.debug.core,
  org.eclipse.jdt.launching,
@@ -35,5 +32,4 @@ Bundle-ClassPath: .,
  lib/jetty-session-12.0.15.jar,
  lib/jakarta.servlet-api-6.0.0.jar
 Export-Package: org.naturzukunft.jdt.mcp,
- org.naturzukunft.jdt.mcp.tools,
- org.naturzukunft.jdt.mcp.preferences
+ org.naturzukunft.jdt.mcp.tools
