@@ -33,41 +33,40 @@ jobs:
         run: tests/smoke-test.sh
         timeout-minutes: 5
 
-      - name: Upload archives
-        if: startsWith(forgejo.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v3
-        with:
-          name: release-archives
-          path: |
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip
-
-  release:
-    needs: build
-    if: startsWith(forgejo.ref, 'refs/tags/v')
-    runs-on: main
-    container:
-      image: registry.cg.internal/ci/jdt-mcp-maven:latest
-    steps:
-      - name: Download archives
-        uses: actions/download-artifact@v3
-        with:
-          name: release-archives
-
       - name: Create release
-        uses: actions/forgejo-release@v2
-        with:
-          direction: upload
-          tag: ${{ forgejo.ref_name }}
-          title: "JDT MCP Server ${{ forgejo.ref_name }}"
-          release-notes: |
-            ## Installation
+        if: startsWith(forgejo.ref, 'refs/tags/v')
+        run: |
+          TAG="${FORGEJO_REF_NAME}"
+          API_URL="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases"
 
-            ```bash
-            curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
-            ```
+          # Create release
+          RELEASE_ID=$(curl -s -X POST "$API_URL" \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"tag_name\": \"${TAG}\",
+              \"name\": \"JDT MCP Server ${TAG}\",
+              \"body\": \"## Installation\n\n\`\`\`bash\ncurl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash\n\`\`\`\n\nOder manuell: Archiv für dein OS herunterladen, entpacken, fertig.\"
+            }" | jq -r '.id')
 
-            Oder manuell: Archiv für dein OS herunterladen, entpacken, fertig.
-          token: ${{ secrets.FORGEJO_TOKEN }}
-          release-dir: ./
+          echo "Created release $RELEASE_ID"
+
+          # Upload assets
+          UPLOAD_URL="${API_URL}/${RELEASE_ID}/assets"
+          for file in \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip; do
+            if [ -f "$file" ]; then
+              NAME=$(basename "$file")
+              echo "Uploading $NAME..."
+              curl -s -X POST "${UPLOAD_URL}?name=${NAME}" \
+                -H "Authorization: token ${FORGEJO_TOKEN}" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@${file}"
+              echo " done."
+            fi
+          done
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          FORGEJO_REF_NAME: ${{ forgejo.ref_name }}
