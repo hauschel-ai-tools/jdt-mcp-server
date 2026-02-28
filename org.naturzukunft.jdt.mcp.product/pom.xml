@@ -71,6 +71,7 @@
                         </goals>
                         <configuration>
                             <target>
+                                <!-- Launcher script -->
                                 <copy todir="${project.build.directory}/products/jdtls-mcp/linux/gtk/x86_64/bin">
                                     <fileset dir="${project.basedir}/bin"/>
                                 </copy>
@@ -79,6 +80,9 @@
                                     <fileset dir="${project.basedir}/bin"/>
                                 </copy>
                                 <chmod file="${project.build.directory}/products/jdtls-mcp/macosx/cocoa/x86_64/bin/jdtls-mcp" perm="755"/>
+                                <!-- Version file -->
+                                <copy file="${project.basedir}/.version" todir="${project.build.directory}/products/jdtls-mcp/linux/gtk/x86_64" failonerror="false"/>
+                                <copy file="${project.basedir}/.version" todir="${project.build.directory}/products/jdtls-mcp/macosx/cocoa/x86_64" failonerror="false"/>
                             </target>
                         </configuration>
                     </execution>

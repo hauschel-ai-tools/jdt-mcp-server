@@ -23,6 +23,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Write version file
+        run: |
+          if [[ "${FORGEJO_REF_NAME}" == v* ]]; then
+            echo "${FORGEJO_REF_NAME#v}" > org.naturzukunft.jdt.mcp.product/.version
+          else
+            echo "dev-${FORGEJO_REF_NAME}" > org.naturzukunft.jdt.mcp.product/.version
+          fi
+          echo "Version: $(cat org.naturzukunft.jdt.mcp.product/.version)"
+        env:
+          FORGEJO_REF_NAME: ${{ forgejo.ref_name }}
+
       - name: Build and package
         run: mvn -B --no-transfer-progress clean package
 
@@ -43,7 +54,7 @@ jobs:
             -d "{
               \"tag_name\": \"${TAG}\",
               \"name\": \"JDT MCP Server ${TAG}\",
-              \"body\": \"## Installation\n\n\`\`\`bash\ncurl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash\n\`\`\`\n\nOder manuell: Archiv für dein OS herunterladen, entpacken, fertig.\"
+              \"body\": \"## Installation\n\n\`\`\`bash\ncurl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/install.sh | bash\n\`\`\`\n\nOder manuell: Archiv für dein OS herunterladen, entpacken, fertig.\"
             }" | jq -r '.id')
 
           echo "Created release $RELEASE_ID"

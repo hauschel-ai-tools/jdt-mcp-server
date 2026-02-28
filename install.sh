@@ -5,7 +5,7 @@
 # Installiert den JDT MCP Server und konfiguriert Claude Code automatisch.
 #
 # Usage:
-#   curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+#   curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/<VERSION>/install.sh | bash
 #
 #   Optionen via Umgebungsvariablen:
 #     JDTMCP_VERSION=1.0.0        Version (default: latest)
@@ -119,9 +119,17 @@ install() {
     local archive="$tmp_dir/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
     curl -sSfL -o "$archive" "$download_url" || error "Download fehlgeschlagen. Existiert Version v${VERSION}?"
 
-    # Vorherige Installation entfernen
+    # Vorherige Installation prüfen
     if [ -d "$INSTALL_DIR" ]; then
-        warn "Vorherige Installation wird ersetzt: $INSTALL_DIR"
+        local old_version="unbekannt"
+        if [ -x "$INSTALL_DIR/bin/jdtls-mcp" ]; then
+            old_version=$("$INSTALL_DIR/bin/jdtls-mcp" --version 2>/dev/null | sed 's/JDT MCP Server //' || echo "unbekannt")
+        fi
+        if [ "$old_version" = "$VERSION" ]; then
+            info "Version $VERSION ist bereits installiert - wird neu installiert"
+        else
+            info "Update: $old_version -> $VERSION"
+        fi
         rm -rf "$INSTALL_DIR"
     fi
 

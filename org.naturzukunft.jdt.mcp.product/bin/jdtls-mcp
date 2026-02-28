@@ -21,6 +21,15 @@ BASEDIR="$(cd "$(dirname "$0")/.." && pwd)"
 TRANSPORT="${JDTMCP_TRANSPORT:-stdio}"
 for arg in "$@"; do
     case "$arg" in
+        --version)
+            VERSION_FILE="$BASEDIR/.version"
+            if [ -f "$VERSION_FILE" ]; then
+                echo "JDT MCP Server $(cat "$VERSION_FILE")"
+            else
+                echo "JDT MCP Server (development)"
+            fi
+            exit 0
+            ;;
         --http) TRANSPORT="http" ;;
     esac
 done
