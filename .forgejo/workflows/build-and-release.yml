@@ -55,40 +55,23 @@ jobs:
             CHANGELOG="- Erster Release"
           fi
 
-          # Build release body
-          BODY=$(cat <<RELEASE_EOF
-## Changes
+          # Build release body using jq to avoid YAML/heredoc issues
+          INSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh"
+          UNINSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh"
+          REPO_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server"
 
-${CHANGELOG}
-
-## Installation / Update
-
-\`\`\`bash
-curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
-\`\`\`
-
-Das Script erkennt bestehende Installationen und führt automatisch ein Update durch.
-
-Danach:
-
-\`\`\`bash
-cd /dein/java-projekt
-claude
-\`\`\`
-
-Die JDT MCP Tools (\`jdt_list_projects\`, \`jdt_find_type\`, ...) stehen sofort zur Verfügung.
-
-## Deinstallation
-
-\`\`\`bash
-curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh | bash
-\`\`\`
-
-## Dokumentation
-
-https://git.changinggraph.org/ai-tools/jdt-mcp-server
-RELEASE_EOF
-          )
+          BODY=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+            "## Changes" \
+            "$CHANGELOG" \
+            "## Installation / Update" \
+            '```bash' \
+            "curl -sSL ${INSTALL_URL} | bash" \
+            '```' \
+            "Das Script erkennt bestehende Installationen und führt automatisch ein Update durch. Danach: \`cd /dein/java-projekt && claude\`" \
+            "## Deinstallation" \
+            "\`curl -sSL ${UNINSTALL_URL} | bash\`" \
+            "## Dokumentation" \
+            "$REPO_URL")
 
           # Create release
           RELEASE_ID=$(curl -s -X POST "$API_URL" \
