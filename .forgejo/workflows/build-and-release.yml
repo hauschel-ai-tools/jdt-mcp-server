@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Write version file
         run: |
@@ -56,9 +58,9 @@ jobs:
           fi
 
           # Build release body using jq to avoid YAML/heredoc issues
-          INSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh"
-          UNINSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh"
-          REPO_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server"
+          INSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/install.sh"
+          UNINSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/uninstall.sh"
+          REPO_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/src/tag/${TAG}"
 
           BODY=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
             "## Changes" \
