@@ -1,0 +1,9 @@
+{
+  "name": "jdt-mcp-server",
+  "description": "Eclipse JDT MCP Server — 44 Tools für Java-Entwicklung: Navigation, Refactoring, Code-Generierung, Tests und mehr.",
+  "author": {
+    "name": "SoftwareEngineering Hauschel"
+  },
+  "repository": "https://git.changinggraph.org/ai-tools/jdt-mcp-server",
+  "license": "EUPL-1.2"
+}
