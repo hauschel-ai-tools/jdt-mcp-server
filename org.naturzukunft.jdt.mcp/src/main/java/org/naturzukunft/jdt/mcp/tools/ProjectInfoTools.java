@@ -84,6 +84,13 @@ public class ProjectInfoTools {
             result.put("projectCount", projects.size());
             result.put("projects", projects);
 
+            if (org.naturzukunft.jdt.mcp.HeadlessApplication.isImporting()) {
+                result.put("status", "importing");
+                result.put("message", "Project import is still in progress. More projects may appear. Call jdt_list_projects again in a few seconds.");
+            } else {
+                result.put("status", "ready");
+            }
+
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {

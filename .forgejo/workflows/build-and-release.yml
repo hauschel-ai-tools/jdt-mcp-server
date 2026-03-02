@@ -47,15 +47,56 @@ jobs:
           TAG="${FORGEJO_REF_NAME}"
           API_URL="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases"
 
+          # Generate changelog from commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" "$PREV_TAG..HEAD" --no-merges | head -20)
+          else
+            CHANGELOG="- Erster Release"
+          fi
+
+          # Build release body
+          BODY=$(cat <<RELEASE_EOF
+## Changes
+
+${CHANGELOG}
+
+## Installation / Update
+
+\`\`\`bash
+curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+\`\`\`
+
+Das Script erkennt bestehende Installationen und führt automatisch ein Update durch.
+
+Danach:
+
+\`\`\`bash
+cd /dein/java-projekt
+claude
+\`\`\`
+
+Die JDT MCP Tools (\`jdt_list_projects\`, \`jdt_find_type\`, ...) stehen sofort zur Verfügung.
+
+## Deinstallation
+
+\`\`\`bash
+curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh | bash
+\`\`\`
+
+## Dokumentation
+
+https://git.changinggraph.org/ai-tools/jdt-mcp-server
+RELEASE_EOF
+          )
+
           # Create release
           RELEASE_ID=$(curl -s -X POST "$API_URL" \
             -H "Authorization: token ${FORGEJO_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"tag_name\": \"${TAG}\",
-              \"name\": \"JDT MCP Server ${TAG}\",
-              \"body\": \"## Installation\n\n\`\`\`bash\ncurl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/install.sh | bash\n\`\`\`\n\nOder manuell: Archiv für dein OS herunterladen, entpacken, fertig.\"
-            }" | jq -r '.id')
+            -d "$(jq -n --arg tag "$TAG" --arg name "JDT MCP Server $TAG" --arg body "$BODY" \
+              '{tag_name: $tag, name: $name, body: $body}')" \
+            | jq -r '.id')
 
           echo "Created release $RELEASE_ID"
 

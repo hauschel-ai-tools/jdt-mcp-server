@@ -78,6 +78,15 @@ install() {
     tar xzf "$ARCHIVE" -C "$INSTALL_DIR" --warning=no-unknown-keyword
     chmod +x "$INSTALL_DIR/bin/jdtls-mcp"
 
+    # Write version file for --version flag
+    local version="dev-local"
+    local git_desc
+    git_desc=$(git -C "$SCRIPT_DIR" describe --tags 2>/dev/null || true)
+    if [ -n "$git_desc" ]; then
+        version="${git_desc#v}"
+    fi
+    echo "$version" > "$INSTALL_DIR/.version"
+
     mkdir -p "$BIN_DIR"
     ln -sf "$INSTALL_DIR/bin/jdtls-mcp" "$BIN_DIR/jdtls-mcp"
     info "Installiert nach $INSTALL_DIR"

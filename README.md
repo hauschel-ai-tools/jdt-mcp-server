@@ -122,6 +122,22 @@ cd /dein/java-projekt
 claude
 ```
 
+### Update
+
+Einfach den gleichen Befehl erneut ausführen:
+
+```bash
+curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+```
+
+Das Script erkennt die bestehende Installation und zeigt den Update-Pfad an (z.B. `Update: 0.2.1 -> 0.2.2`).
+
+Installierte Version prüfen:
+
+```bash
+jdtls-mcp --version
+```
+
 ### Installation aus lokalem Build
 
 ```bash
@@ -131,6 +147,12 @@ cd jdt-mcp-server
 ```
 
 ### Deinstallation
+
+```bash
+curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh | bash
+```
+
+Oder manuell:
 
 ```bash
 rm -rf ~/.local/share/jdtls-mcp ~/.local/bin/jdtls-mcp

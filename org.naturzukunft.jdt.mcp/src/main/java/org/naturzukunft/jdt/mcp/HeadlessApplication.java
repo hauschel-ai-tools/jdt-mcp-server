@@ -3,6 +3,7 @@ package org.naturzukunft.jdt.mcp;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.NullProgressMonitor;
@@ -13,11 +14,16 @@ import org.naturzukunft.jdt.mcp.server.McpStdioServer;
 
 /**
  * Headless Eclipse application for running the JDT MCP server standalone.
- * Imports the current working directory as a Java project and keeps the server running.
+ * Starts the MCP server immediately, then imports projects in the background.
  */
 public class HeadlessApplication implements IApplication {
 
+    private static final AtomicBoolean importing = new AtomicBoolean(false);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
+
+    public static boolean isImporting() {
+        return importing.get();
+    }
 
     @Override
     public Object start(IApplicationContext context) throws Exception {
@@ -27,24 +33,36 @@ public class HeadlessApplication implements IApplication {
         McpLogger.init();
         McpLogger.info("HeadlessApplication", "Starting JDT MCP Server (standalone)");
 
-        // Import project from working directory
-        String workDir = System.getProperty("user.dir");
-        McpLogger.info("HeadlessApplication", "Working directory: " + workDir);
-
-        List<IProject> projects = ProjectImporter.importFromDirectory(
-                Path.of(workDir), new NullProgressMonitor());
-
-        McpLogger.info("HeadlessApplication", "Imported " + projects.size() + " project(s):");
-        for (IProject project : projects) {
-            McpLogger.info("HeadlessApplication", "  - " + project.getName() +
-                    " (" + project.getLocation() + ")");
-        }
-
-        // Start MCP server (Activator skips auto-start in headless mode)
+        // Start MCP server FIRST so clients can connect immediately
         Activator activator = Activator.getDefault();
         if (activator != null) {
             activator.startMcpServer();
         }
+
+        // Import projects from working directory in background
+        String workDir = System.getProperty("user.dir");
+        McpLogger.info("HeadlessApplication", "Working directory: " + workDir);
+
+        importing.set(true);
+        Thread importThread = new Thread(() -> {
+            try {
+                List<IProject> projects = ProjectImporter.importFromDirectory(
+                        Path.of(workDir), new NullProgressMonitor());
+
+                McpLogger.info("HeadlessApplication", "Imported " + projects.size() + " project(s):");
+                for (IProject project : projects) {
+                    McpLogger.info("HeadlessApplication", "  - " + project.getName() +
+                            " (" + project.getLocation() + ")");
+                }
+            } catch (Exception e) {
+                McpLogger.error("HeadlessApplication", "Project import failed", e);
+            } finally {
+                importing.set(false);
+                McpLogger.info("HeadlessApplication", "Project import finished");
+            }
+        }, "jdtmcp-project-importer");
+        importThread.setDaemon(true);
+        importThread.start();
 
         McpServerManager manager = activator != null ? activator.getMcpServerManager() : null;
         if (manager != null && manager.isRunning()) {

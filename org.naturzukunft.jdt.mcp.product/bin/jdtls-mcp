@@ -15,7 +15,12 @@
 
 set -euo pipefail
 
-BASEDIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve symlinks to find the real installation directory
+SCRIPT="$0"
+while [ -L "$SCRIPT" ]; do
+    SCRIPT="$(readlink "$SCRIPT")"
+done
+BASEDIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 
 # Parse arguments
 TRANSPORT="${JDTMCP_TRANSPORT:-stdio}"
