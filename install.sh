@@ -112,11 +112,10 @@ install() {
 
     info "Download: $download_url"
 
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    trap 'rm -rf "$tmp_dir"' EXIT
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR"' EXIT
 
-    local archive="$tmp_dir/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
+    local archive="$TMP_DIR/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
     curl -sSfL -o "$archive" "$download_url" || error "Download fehlgeschlagen. Existiert Version v${VERSION}?"
 
     # Vorherige Installation prüfen
