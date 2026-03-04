@@ -62,14 +62,23 @@ jobs:
           UNINSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/uninstall.sh"
           REPO_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/src/tag/${TAG}"
 
-          BODY=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+          BODY=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+            "## Unterstützte Plattformen" \
+            "| Plattform | Architektur | Install-Script | Manuell |" \
+            "|---|---|---|---|" \
+            "| Linux | x86_64, aarch64 | ✅ | tar.gz |" \
+            "| macOS | x86_64, aarch64 (Apple Silicon) | ✅ | tar.gz |" \
+            "| Windows | x86_64 | - | zip + jdtls-mcp.cmd |" \
             "## Changes" \
             "$CHANGELOG" \
-            "## Installation / Update" \
+            "## Installation / Update (Linux & macOS)" \
             '```bash' \
             "curl -sSL ${INSTALL_URL} | bash" \
             '```' \
-            "Das Script erkennt bestehende Installationen und führt automatisch ein Update durch. Danach: \`cd /dein/java-projekt && claude\`" \
+            "Das Script erkennt OS/Architektur automatisch und führt bei bestehender Installation ein Update durch. Danach: \`cd /dein/java-projekt && claude\`" \
+            "## Installation (Windows)" \
+            "1. ZIP-Archiv herunterladen und entpacken (z.B. nach \`%LOCALAPPDATA%\\jdtls-mcp\`)" \
+            "2. \`claude mcp add -s user jdt-mcp %LOCALAPPDATA%\\jdtls-mcp\\bin\\jdtls-mcp.cmd\`" \
             "## Deinstallation" \
             "\`curl -sSL ${UNINSTALL_URL} | bash\`" \
             "## Dokumentation" \
@@ -89,7 +98,9 @@ jobs:
           UPLOAD_URL="${API_URL}/${RELEASE_ID}/assets"
           for file in \
             org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.aarch64.tar.gz \
             org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.aarch64.tar.gz \
             org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip; do
             if [ -f "$file" ]; then
               NAME=$(basename "$file")

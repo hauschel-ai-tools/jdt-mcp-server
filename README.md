@@ -107,7 +107,15 @@ Der Server stellt **44 MCP-Tools** in 9 Kategorien bereit:
 - Java 21+
 - Maven 3.9+ (nur für Build aus Source)
 
-## Installation (ein Befehl)
+## Unterstützte Plattformen
+
+| Plattform | Architektur | Install-Script | Manuell |
+|---|---|---|---|
+| Linux | x86_64, aarch64 | `curl ... \| bash` | tar.gz |
+| macOS | x86_64, aarch64 (Apple Silicon) | `curl ... \| bash` | tar.gz |
+| Windows | x86_64 | - | zip + `jdtls-mcp.cmd` |
+
+## Installation (Linux & macOS)
 
 ```bash
 curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
@@ -159,7 +167,7 @@ rm -rf ~/.local/share/jdtls-mcp ~/.local/bin/jdtls-mcp
 claude mcp remove jdt-mcp
 ```
 
-### Manuelle Installation
+### Manuelle Installation (Linux/macOS)
 
 ```bash
 # Archiv herunterladen von:
@@ -171,6 +179,19 @@ tar xzf jdtls-mcp-linux.gtk.x86_64.tar.gz -C ~/.local/share/jdtls-mcp
 
 # Claude Code konfigurieren
 claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
+```
+
+### Manuelle Installation (Windows)
+
+```powershell
+# ZIP-Archiv herunterladen von:
+# https://git.changinggraph.org/ai-tools/jdt-mcp-server/releases
+
+# Entpacken (z.B. nach %LOCALAPPDATA%\jdtls-mcp)
+Expand-Archive jdtls-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdtls-mcp"
+
+# Claude Code konfigurieren
+claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 ```
 
 ### Erweiterte Optionen
