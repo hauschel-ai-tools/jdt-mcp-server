@@ -1,6 +1,6 @@
 # Eclipse JDT MCP Server
 
-[![Mirror](https://img.shields.io/badge/mirror-GitHub-blue)](https://github.com/hauschel-ai-tools/jdt-mcp-server)
+[![GitHub Mirror](https://img.shields.io/badge/mirror-GitHub-blue)](https://github.com/hauschel-ai-tools/jdt-mcp-server)
 
 MCP-Server (Model Context Protocol) für Java Development Tools (JDT). Stellt JDT-Funktionen für KI-Coding-Assistenten wie Claude Code, Cursor und andere bereit.
 
