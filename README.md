@@ -2,6 +2,12 @@
 
 [![GitHub Mirror](https://img.shields.io/badge/mirror-GitHub-blue)](https://github.com/hauschel-ai-tools/jdt-mcp-server)
 
+> **Note:** The GitHub repository is a read-only mirror. Please open issues and pull requests on [Forgejo](https://git.changinggraph.org/ai-tools/jdt-mcp-server).
+
+An MCP server (Model Context Protocol) that exposes Eclipse JDT features to AI coding assistants like Claude Code, Cursor, and others. It provides **44 tools** across 9 categories — covering navigation, refactoring, code generation, test execution, and more. Runs as a **standalone CLI** (stdio) without requiring the Eclipse IDE. Install with a single `curl | bash` command, then use it from any Java project.
+
+---
+
 MCP-Server (Model Context Protocol) für Java Development Tools (JDT). Stellt JDT-Funktionen für KI-Coding-Assistenten wie Claude Code, Cursor und andere bereit.
 
 **Standalone CLI** - Läuft ohne Eclipse IDE, direkt als MCP-Subprocess (stdio). Einfach installieren, in ein Java-Projekt wechseln, Claude Code starten.
@@ -202,6 +208,7 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 |-------------------|-------------|----------|
 | `JDTMCP_TRANSPORT` | Transport: `stdio` oder `http` | `stdio` |
 | `JDTMCP_WORKSPACE` | Eclipse Workspace-Verzeichnis | `/tmp/jdtls-mcp-<pid>` |
+| `JDTMCP_SOURCE` | Download-Quelle für install.sh: `forgejo` oder `github` | auto-detect |
 | `JAVA_HOME` | Java-Installation | System-Java |
 
 ```bash
@@ -241,6 +248,18 @@ jdtls-mcp --http
 ### Tests laufen zu lange
 
 `jdt_start_tests_async` statt `jdt_run_tests` verwenden. MCP-Client-Timeout ist 60s.
+
+## Entwicklung
+
+### Smoke Tests
+
+Der Server hat stdio-basierte Smoke Tests, die den MCP-Protokoll-Handshake und grundlegende Tool-Aufrufe prüfen:
+
+```bash
+tests/smoke-test.sh [path/to/jdtls-mcp-binary]
+```
+
+Ohne Argument wird `jdtls-mcp` aus dem PATH verwendet.
 
 ## Lizenz
 

@@ -12,7 +12,7 @@
 
     <name>Eclipse JDT MCP Server - Parent</name>
     <description>Eclipse Plugin that embeds an MCP Server to expose JDT features to AI coding assistants</description>
-    <url>https://codeberg.org/naturzukunft/jdt-mcp-server</url>
+    <url>https://git.changinggraph.org/ai-tools/jdt-mcp-server</url>
 
     <modules>
         <module>org.naturzukunft.jdt.mcp</module>
@@ -24,8 +24,8 @@
     <properties>
         <tycho.version>4.0.4</tycho.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
     </properties>
 
     <repositories>
