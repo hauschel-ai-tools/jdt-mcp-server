@@ -17,12 +17,31 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           API_URL="https://git.changinggraph.org/api/v1/repos/ai-tools/jdt-mcp-server/releases/tags/${TAG}"
 
-          echo "Fetching release for tag ${TAG}..."
-          RELEASE=$(curl -sf "${API_URL}")
-          if [ $? -ne 0 ]; then
-            echo "::error::Release ${TAG} not found on Forgejo"
+          # Wait for Forgejo release (build takes ~2-3 min)
+          echo "Waiting for Forgejo release ${TAG}..."
+          for i in $(seq 1 30); do
+            RELEASE=$(curl -sf "${API_URL}" 2>/dev/null) && break
+            echo "  Attempt ${i}/30 - release not ready, waiting 30s..."
+            sleep 30
+          done
+
+          if [ -z "${RELEASE:-}" ]; then
+            echo "::error::Release ${TAG} not found on Forgejo after 15 minutes"
             exit 1
           fi
+
+          # Wait for assets (release may exist before build uploads binaries)
+          echo "Checking for assets..."
+          for i in $(seq 1 20); do
+            ASSET_COUNT=$(echo "$RELEASE" | jq '.assets | length')
+            if [ "$ASSET_COUNT" -gt 0 ]; then
+              echo "Found ${ASSET_COUNT} assets."
+              break
+            fi
+            echo "  Attempt ${i}/20 - no assets yet, waiting 30s..."
+            sleep 30
+            RELEASE=$(curl -sf "${API_URL}")
+          done
 
           # Extract release body
           echo "$RELEASE" | jq -r '.body // ""' > /tmp/release-body.md
