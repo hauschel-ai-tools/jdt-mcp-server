@@ -43,8 +43,13 @@ jobs:
             RELEASE=$(curl -sf "${API_URL}")
           done
 
-          # Extract release body
-          echo "$RELEASE" | jq -r '.body // ""' > /tmp/release-body.md
+          # Extract release body and rewrite URLs for GitHub
+          GITHUB_REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+          echo "$RELEASE" | jq -r '.body // ""' \
+            | sed "s|https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/install.sh|${GITHUB_REPO_URL}/raw/${TAG}/install.sh|g" \
+            | sed "s|https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/uninstall.sh|${GITHUB_REPO_URL}/raw/${TAG}/uninstall.sh|g" \
+            | sed "s|https://git.changinggraph.org/ai-tools/jdt-mcp-server/src/tag/${TAG}|${GITHUB_REPO_URL}/tree/${TAG}|g" \
+            > /tmp/release-body.md
 
           # Download all assets
           mkdir -p /tmp/assets
