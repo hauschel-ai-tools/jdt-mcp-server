@@ -62,40 +62,44 @@ jobs:
           UNINSTALL_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/${TAG}/uninstall.sh"
           REPO_URL="https://git.changinggraph.org/ai-tools/jdt-mcp-server/src/tag/${TAG}"
 
-          TABLE="| Plattform | Architektur | Install-Script | Manuell |
-|---|---|---|---|
-| Linux | x86_64, aarch64 | ✅ | tar.gz |
-| macOS | x86_64, aarch64 (Apple Silicon) | ✅ | tar.gz |
-| Windows | x86_64 | - | zip + jdtls-mcp.cmd |"
-
-          BODY="## Unterstützte Plattformen
-
-${TABLE}
-
-## Changes
-
-${CHANGELOG}
-
-## Installation / Update (Linux & macOS)
-
-\`\`\`bash
-curl -sSL ${INSTALL_URL} | bash
-\`\`\`
-
-Das Script erkennt OS/Architektur automatisch und führt bei bestehender Installation ein Update durch. Danach: \`cd /dein/java-projekt && claude\`
-
-## Installation (Windows)
-
-1. ZIP-Archiv herunterladen und entpacken (z.B. nach \`%LOCALAPPDATA%\\jdtls-mcp\`)
-2. \`claude mcp add -s user jdt-mcp %LOCALAPPDATA%\\jdtls-mcp\\bin\\jdtls-mcp.cmd\`
-
-## Deinstallation
-
-\`curl -sSL ${UNINSTALL_URL} | bash\`
-
-## Dokumentation
-
-${REPO_URL}"
+          BODY=$(jq -n \
+            --arg changelog "$CHANGELOG" \
+            --arg install_url "$INSTALL_URL" \
+            --arg uninstall_url "$UNINSTALL_URL" \
+            --arg repo_url "$REPO_URL" \
+            '[ "## Unterstützte Plattformen",
+               "",
+               "| Plattform | Architektur | Install-Script | Manuell |",
+               "|---|---|---|---|",
+               "| Linux | x86_64, aarch64 | ✅ | tar.gz |",
+               "| macOS | x86_64, aarch64 (Apple Silicon) | ✅ | tar.gz |",
+               "| Windows | x86_64 | - | zip + jdtls-mcp.cmd |",
+               "",
+               "## Changes",
+               "",
+               $changelog,
+               "",
+               "## Installation / Update (Linux & macOS)",
+               "",
+               "```bash",
+               "curl -sSL \($install_url) | bash",
+               "```",
+               "",
+               "Das Script erkennt OS/Architektur automatisch und führt bei bestehender Installation ein Update durch. Danach: `cd /dein/java-projekt && claude`",
+               "",
+               "## Installation (Windows)",
+               "",
+               "1. ZIP-Archiv herunterladen und entpacken (z.B. nach `%LOCALAPPDATA%\\jdtls-mcp`)",
+               "2. `claude mcp add -s user jdt-mcp %LOCALAPPDATA%\\jdtls-mcp\\bin\\jdtls-mcp.cmd`",
+               "",
+               "## Deinstallation",
+               "",
+               "`curl -sSL \($uninstall_url) | bash`",
+               "",
+               "## Dokumentation",
+               "",
+               $repo_url
+             ] | join("\n")' -r)
 
           # Create release
           RELEASE_ID=$(curl -s -X POST "$API_URL" \
