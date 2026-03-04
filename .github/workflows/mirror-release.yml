@@ -1,0 +1,59 @@
+name: Mirror Forgejo Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  mirror-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch Forgejo release metadata
+        id: forgejo
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          API_URL="https://git.changinggraph.org/api/v1/repos/ai-tools/jdt-mcp-server/releases/tags/${TAG}"
+
+          echo "Fetching release for tag ${TAG}..."
+          RELEASE=$(curl -sf "${API_URL}")
+          if [ $? -ne 0 ]; then
+            echo "::error::Release ${TAG} not found on Forgejo"
+            exit 1
+          fi
+
+          # Extract release body
+          echo "$RELEASE" | jq -r '.body // ""' > /tmp/release-body.md
+
+          # Download all assets
+          mkdir -p /tmp/assets
+          echo "$RELEASE" | jq -r '.assets[] | "\(.name)\t\(.browser_download_url)"' | while IFS=$'\t' read -r name url; do
+            echo "Downloading ${name}..."
+            curl -sfL -o "/tmp/assets/${name}" "${url}"
+          done
+
+          echo "assets_dir=/tmp/assets" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          # Collect asset files
+          FILES=()
+          for f in /tmp/assets/*; do
+            [ -f "$f" ] && FILES+=("$f")
+          done
+
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::warning::No assets found, creating release without binaries"
+          fi
+
+          gh release create "${TAG}" \
+            --title "JDT MCP Server ${TAG}" \
+            --notes-file /tmp/release-body.md \
+            "${FILES[@]}"
