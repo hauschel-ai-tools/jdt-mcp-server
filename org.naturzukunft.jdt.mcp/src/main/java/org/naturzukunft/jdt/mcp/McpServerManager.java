@@ -110,6 +110,8 @@ public class McpServerManager {
             ProjectInfoTools.getCompilationErrorsTool(),
             ProjectInfoTools.getProjectStructureTool(),
             ProjectInfoTools.refreshProjectTool(),
+            ProjectInfoTools.importProjectTool(),
+            ProjectInfoTools.removeProjectTool(),
 
             // Creation Tools
             CreationTools.createClassTool(),
