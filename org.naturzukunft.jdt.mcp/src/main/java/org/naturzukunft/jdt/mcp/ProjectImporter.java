@@ -56,11 +56,8 @@ public class ProjectImporter {
             // Maven project
             imported.addAll(importMavenProject(directory, monitor));
         } else {
-            // Fallback: import as basic Java project
-            IProject project = importBasicJavaProject(directory, monitor);
-            if (project != null) {
-                imported.add(project);
-            }
+            // No project markers in root — scan subdirectories for projects
+            imported.addAll(scanSubdirectories(directory, monitor));
         }
 
         return imported;
@@ -266,6 +263,15 @@ public class ProjectImporter {
     }
 
     /**
+     * Resolves Maven dependencies and returns them as classpath entries.
+     */
+    public static List<IClasspathEntry> resolveMavenDependencies(Path moduleDir) {
+        List<IClasspathEntry> entries = new ArrayList<>();
+        addMavenDependencies(moduleDir, entries);
+        return entries;
+    }
+
+    /**
      * Resolves Maven dependencies using 'mvn dependency:build-classpath' and adds them.
      */
     private static void addMavenDependencies(Path moduleDir, List<IClasspathEntry> entries) {
@@ -338,6 +344,53 @@ public class ProjectImporter {
             McpLogger.warn("ProjectImporter", "Could not parse pom.xml: " + pomFile + " - " + e.getMessage());
         }
         return modules;
+    }
+
+    /**
+     * Scans immediate subdirectories for projects (.project or pom.xml).
+     * Falls back to importing the root as a basic Java project if no subprojects found.
+     */
+    private static List<IProject> scanSubdirectories(Path directory, IProgressMonitor monitor) {
+        List<IProject> imported = new ArrayList<>();
+
+        try (var entries = Files.newDirectoryStream(directory, Files::isDirectory)) {
+            for (Path subDir : entries) {
+                String name = subDir.getFileName().toString();
+                if (name.startsWith(".")) {
+                    continue;
+                }
+                Path subProjectFile = subDir.resolve(".project");
+                Path subPomFile = subDir.resolve("pom.xml");
+
+                if (Files.exists(subProjectFile)) {
+                    IProject project = importExistingProject(subDir, monitor);
+                    if (project != null) {
+                        imported.add(project);
+                    }
+                } else if (Files.exists(subPomFile)) {
+                    imported.addAll(importMavenProject(subDir, monitor));
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter", "Error scanning subdirectories: " + e.getMessage());
+        }
+
+        if (imported.isEmpty()) {
+            // No subprojects found — try importing root as basic Java project
+            IProject project = importBasicJavaProject(directory, monitor);
+            if (project != null) {
+                imported.add(project);
+            }
+        }
+
+        return imported;
+    }
+
+    /**
+     * Imports a project from a specific path. Can be called at any time to add projects.
+     */
+    public static List<IProject> importFromPath(Path path, IProgressMonitor monitor) {
+        return importFromDirectory(path, monitor);
     }
 
     /**

@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.nio.file.Path;
+
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
@@ -18,6 +20,7 @@ import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.JavaCore;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
+import org.naturzukunft.jdt.mcp.ProjectImporter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -423,8 +426,15 @@ public class ProjectInfoTools {
             } else {
                 // Refresh entire workspace
                 ResourcesPlugin.getWorkspace().getRoot().refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+
+                // Also scan for new projects that haven't been imported yet
+                String workDir = System.getProperty("user.dir");
+                List<IProject> projects = ProjectImporter.importFromPath(
+                        Path.of(workDir), new NullProgressMonitor());
+
                 result.put("refreshed", "workspace");
                 result.put("scope", "workspace");
+                result.put("projectsFound", projects.size());
             }
 
             result.put("status", "SUCCESS");
@@ -434,6 +444,183 @@ public class ProjectInfoTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error refreshing: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Update Maven project configuration (re-resolve dependencies).
+     */
+    public static ToolRegistration mavenUpdateProjectTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_maven_update_project",
+                "Re-resolve Maven dependencies and update the project classpath. " +
+                "Call this after editing pom.xml (adding/removing dependencies, changing versions). " +
+                "Equivalent to Eclipse's 'Maven > Update Project'. " +
+                "WORKFLOW: Edit pom.xml → jdt_maven_update_project → jdt_refresh_project → jdt_get_compilation_errors",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> mavenUpdateProject((String) args.get("projectName")));
+    }
+
+    private static CallToolResult mavenUpdateProject(String projectName) {
+        try {
+            IJavaProject javaProject = getJavaProject(projectName);
+            if (javaProject == null) {
+                return new CallToolResult("Java project not found: " + projectName, true);
+            }
+
+            IProject project = javaProject.getProject();
+            Path projectDir = Path.of(project.getLocation().toOSString());
+
+            if (!java.nio.file.Files.exists(projectDir.resolve("pom.xml"))) {
+                return new CallToolResult("Not a Maven project (no pom.xml): " + projectName, true);
+            }
+
+            // Resolve new Maven dependencies
+            List<IClasspathEntry> mavenEntries = ProjectImporter.resolveMavenDependencies(projectDir);
+
+            // Rebuild classpath: keep source entries and JRE container, replace library entries
+            List<IClasspathEntry> newClasspath = new ArrayList<>();
+            for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE
+                        || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER
+                        || entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                    newClasspath.add(entry);
+                }
+            }
+            newClasspath.addAll(mavenEntries);
+
+            javaProject.setRawClasspath(
+                    newClasspath.toArray(new IClasspathEntry[0]),
+                    new NullProgressMonitor());
+
+            // Refresh to pick up any file changes
+            project.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("dependenciesResolved", mavenEntries.size());
+            result.put("totalClasspathEntries", newClasspath.size());
+            result.put("status", "SUCCESS");
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error updating Maven project: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Import a project from a directory path.
+     */
+    public static ToolRegistration importProjectTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("path", Map.of(
+                        "type", "string",
+                        "description", "Absolute path to the project directory to import (must contain pom.xml or .project, or be a directory with Java sources)")),
+                List.of("path"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_import_project",
+                "Import a Java project from a directory into the workspace. " +
+                "Supports Maven projects (pom.xml), Eclipse projects (.project), and plain Java projects. " +
+                "For Maven multi-module projects, all modules are imported. " +
+                "Use this when jdt_list_projects shows 0 projects or to add additional projects.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> importProject((String) args.get("path")));
+    }
+
+    private static CallToolResult importProject(String path) {
+        try {
+            if (path == null || path.isEmpty()) {
+                return new CallToolResult("Path is required", true);
+            }
+
+            java.nio.file.Path projectPath = Path.of(path);
+            if (!java.nio.file.Files.isDirectory(projectPath)) {
+                return new CallToolResult("Not a directory: " + path, true);
+            }
+
+            List<IProject> imported = ProjectImporter.importFromPath(projectPath, new NullProgressMonitor());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("importedCount", imported.size());
+            result.put("projects", imported.stream()
+                    .map(p -> Map.of(
+                            "name", p.getName(),
+                            "location", p.getLocation().toString()))
+                    .toList());
+            result.put("status", imported.isEmpty() ? "NO_PROJECTS_FOUND" : "SUCCESS");
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error importing project: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Tool: Remove a project from the workspace.
+     */
+    public static ToolRegistration removeProjectTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(
+                        "projectName", Map.of(
+                                "type", "string",
+                                "description", "Eclipse project name to remove (get from jdt_list_projects)"),
+                        "deleteContents", Map.of(
+                                "type", "boolean",
+                                "description", "If true, also delete project files on disk. Default: false (only removes from workspace)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_remove_project",
+                "Remove a project from the Eclipse workspace. " +
+                "By default only removes the project reference (files stay on disk). " +
+                "Set deleteContents=true to also delete files (DANGEROUS - cannot be undone!).",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> removeProject(
+                (String) args.get("projectName"),
+                Boolean.TRUE.equals(args.get("deleteContents"))));
+    }
+
+    private static CallToolResult removeProject(String projectName, boolean deleteContents) {
+        try {
+            IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+            if (project == null || !project.exists()) {
+                return new CallToolResult("Project not found: " + projectName, true);
+            }
+
+            String location = project.getLocation().toString();
+            project.delete(deleteContents, true, new NullProgressMonitor());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("location", location);
+            result.put("contentsDeleted", deleteContents);
+            result.put("status", "SUCCESS");
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error removing project: " + e.getMessage(), true);
         }
     }
 
