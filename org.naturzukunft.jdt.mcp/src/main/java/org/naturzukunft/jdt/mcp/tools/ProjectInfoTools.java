@@ -448,6 +448,78 @@ public class ProjectInfoTools {
     }
 
     /**
+     * Tool: Update Maven project configuration (re-resolve dependencies).
+     */
+    public static ToolRegistration mavenUpdateProjectTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of("projectName", Map.of(
+                        "type", "string",
+                        "description", "Eclipse project name (get from jdt_list_projects)")),
+                List.of("projectName"),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_maven_update_project",
+                "Re-resolve Maven dependencies and update the project classpath. " +
+                "Call this after editing pom.xml (adding/removing dependencies, changing versions). " +
+                "Equivalent to Eclipse's 'Maven > Update Project'. " +
+                "WORKFLOW: Edit pom.xml → jdt_maven_update_project → jdt_refresh_project → jdt_get_compilation_errors",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> mavenUpdateProject((String) args.get("projectName")));
+    }
+
+    private static CallToolResult mavenUpdateProject(String projectName) {
+        try {
+            IJavaProject javaProject = getJavaProject(projectName);
+            if (javaProject == null) {
+                return new CallToolResult("Java project not found: " + projectName, true);
+            }
+
+            IProject project = javaProject.getProject();
+            Path projectDir = Path.of(project.getLocation().toOSString());
+
+            if (!java.nio.file.Files.exists(projectDir.resolve("pom.xml"))) {
+                return new CallToolResult("Not a Maven project (no pom.xml): " + projectName, true);
+            }
+
+            // Resolve new Maven dependencies
+            List<IClasspathEntry> mavenEntries = ProjectImporter.resolveMavenDependencies(projectDir);
+
+            // Rebuild classpath: keep source entries and JRE container, replace library entries
+            List<IClasspathEntry> newClasspath = new ArrayList<>();
+            for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE
+                        || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER
+                        || entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                    newClasspath.add(entry);
+                }
+            }
+            newClasspath.addAll(mavenEntries);
+
+            javaProject.setRawClasspath(
+                    newClasspath.toArray(new IClasspathEntry[0]),
+                    new NullProgressMonitor());
+
+            // Refresh to pick up any file changes
+            project.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("projectName", projectName);
+            result.put("dependenciesResolved", mavenEntries.size());
+            result.put("totalClasspathEntries", newClasspath.size());
+            result.put("status", "SUCCESS");
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error updating Maven project: " + e.getMessage(), true);
+        }
+    }
+
+    /**
      * Tool: Import a project from a directory path.
      */
     public static ToolRegistration importProjectTool() {

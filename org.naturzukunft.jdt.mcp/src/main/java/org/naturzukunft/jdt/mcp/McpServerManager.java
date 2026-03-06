@@ -110,6 +110,7 @@ public class McpServerManager {
             ProjectInfoTools.getCompilationErrorsTool(),
             ProjectInfoTools.getProjectStructureTool(),
             ProjectInfoTools.refreshProjectTool(),
+            ProjectInfoTools.mavenUpdateProjectTool(),
             ProjectInfoTools.importProjectTool(),
             ProjectInfoTools.removeProjectTool(),
 

@@ -263,6 +263,15 @@ public class ProjectImporter {
     }
 
     /**
+     * Resolves Maven dependencies and returns them as classpath entries.
+     */
+    public static List<IClasspathEntry> resolveMavenDependencies(Path moduleDir) {
+        List<IClasspathEntry> entries = new ArrayList<>();
+        addMavenDependencies(moduleDir, entries);
+        return entries;
+    }
+
+    /**
      * Resolves Maven dependencies using 'mvn dependency:build-classpath' and adds them.
      */
     private static void addMavenDependencies(Path moduleDir, List<IClasspathEntry> entries) {
