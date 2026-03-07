@@ -4,7 +4,11 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -66,6 +70,11 @@ public class ProjectImporter {
         } else {
             // No project markers in root — scan subdirectories for projects
             imported.addAll(scanSubdirectories(directory, monitor));
+        }
+
+        // Wire up inter-project dependencies so JDT can resolve cross-module references
+        if (imported.size() > 1) {
+            setupInterProjectDependencies(imported, monitor);
         }
 
         return imported;
@@ -347,6 +356,175 @@ public class ProjectImporter {
     }
 
     /**
+     * Sets up inter-project dependencies so JDT can resolve cross-module references.
+     * For each project, parses its pom.xml to find dependencies on other workspace projects,
+     * then adds project entries to the classpath (replacing any matching JAR entries).
+     */
+    private static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
+        // Build a map of artifactId -> IProject for all workspace projects
+        Map<String, IProject> artifactToProject = new HashMap<>();
+        for (IProject project : projects) {
+            Path projectDir = Path.of(project.getLocation().toOSString());
+            Path pomFile = projectDir.resolve("pom.xml");
+            if (Files.exists(pomFile)) {
+                String artifactId = readMavenArtifactId(pomFile);
+                if (artifactId != null) {
+                    artifactToProject.put(artifactId, project);
+                }
+            }
+        }
+
+        if (artifactToProject.size() < 2) {
+            return; // Nothing to wire up
+        }
+
+        int totalAdded = 0;
+        for (IProject project : projects) {
+            try {
+                IJavaProject javaProject = JavaCore.create(project);
+                if (javaProject == null || !javaProject.exists()) {
+                    continue;
+                }
+
+                Path projectDir = Path.of(project.getLocation().toOSString());
+                Path pomFile = projectDir.resolve("pom.xml");
+                if (!Files.exists(pomFile)) {
+                    continue;
+                }
+
+                List<String> depArtifactIds = readMavenDependencyArtifactIds(pomFile);
+                List<IClasspathEntry> projectEntries = new ArrayList<>();
+
+                for (String depArtifactId : depArtifactIds) {
+                    IProject depProject = artifactToProject.get(depArtifactId);
+                    if (depProject != null && !depProject.equals(project)) {
+                        projectEntries.add(JavaCore.newProjectEntry(depProject.getFullPath()));
+                    }
+                }
+
+                if (!projectEntries.isEmpty()) {
+                    // Get existing classpath and add project entries
+                    IClasspathEntry[] existing = javaProject.getRawClasspath();
+                    List<IClasspathEntry> newClasspath = new ArrayList<>();
+
+                    // Collect project names we're adding
+                    Set<String> projectArtifactIds = new HashSet<>();
+                    List<IProject> referencedProjects = new ArrayList<>();
+                    for (IClasspathEntry entry : projectEntries) {
+                        String projName = entry.getPath().lastSegment();
+                        projectArtifactIds.add(projName);
+                        IProject refProject = ResourcesPlugin.getWorkspace().getRoot().getProject(projName);
+                        if (refProject.exists()) {
+                            referencedProjects.add(refProject);
+                        }
+                    }
+
+                    // Keep existing entries, skip JARs that match workspace projects
+                    for (IClasspathEntry entry : existing) {
+                        if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                            String jarName = entry.getPath().lastSegment();
+                            boolean isWorkspaceProject = false;
+                            for (String artifactId : projectArtifactIds) {
+                                if (jarName.startsWith(artifactId + "-")) {
+                                    isWorkspaceProject = true;
+                                    break;
+                                }
+                            }
+                            if (isWorkspaceProject) {
+                                continue; // Skip JAR, we'll use project entry instead
+                            }
+                        }
+                        // Skip duplicate project entries
+                        if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                            boolean alreadyAdded = projectEntries.stream()
+                                    .anyMatch(pe -> pe.getPath().equals(entry.getPath()));
+                            if (alreadyAdded) {
+                                continue;
+                            }
+                        }
+                        newClasspath.add(entry);
+                    }
+
+                    // Add project entries to classpath
+                    newClasspath.addAll(projectEntries);
+                    javaProject.setRawClasspath(newClasspath.toArray(new IClasspathEntry[0]), monitor);
+
+                    // Also set Eclipse project references (required by RefactoringScopeFactory
+                    // which uses IProject.getReferencingProjects() to determine rename scope)
+                    IProjectDescription desc = project.getDescription();
+                    IProject[] existingRefs = desc.getReferencedProjects();
+                    Set<IProject> allRefs = new HashSet<>(java.util.Arrays.asList(existingRefs));
+                    allRefs.addAll(referencedProjects);
+                    desc.setReferencedProjects(allRefs.toArray(new IProject[0]));
+                    project.setDescription(desc, monitor);
+
+                    totalAdded += projectEntries.size();
+
+                    McpLogger.info("ProjectImporter", "Added " + projectEntries.size() +
+                            " project dependencies to " + project.getName());
+                }
+            } catch (Exception e) {
+                McpLogger.warn("ProjectImporter",
+                        "Could not set up project dependencies for " + project.getName() + ": " + e.getMessage());
+            }
+        }
+
+        if (totalAdded > 0) {
+            McpLogger.info("ProjectImporter",
+                    "Set up " + totalAdded + " inter-project dependencies across " + projects.size() + " projects");
+        }
+    }
+
+    /**
+     * Reads the artifactId from a Maven pom.xml.
+     */
+    private static String readMavenArtifactId(Path pomFile) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(pomFile.toFile());
+
+            // Get direct child <artifactId> (not from <parent> or <dependency>)
+            NodeList children = doc.getDocumentElement().getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                if (children.item(i) instanceof Element el
+                        && "artifactId".equals(el.getTagName())) {
+                    return el.getTextContent().trim();
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter", "Could not read artifactId from " + pomFile + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Reads dependency artifactIds from a Maven pom.xml.
+     */
+    private static List<String> readMavenDependencyArtifactIds(Path pomFile) {
+        List<String> artifactIds = new ArrayList<>();
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(pomFile.toFile());
+
+            NodeList depNodes = doc.getElementsByTagName("dependency");
+            for (int i = 0; i < depNodes.getLength(); i++) {
+                Element dep = (Element) depNodes.item(i);
+                NodeList artifactIdNodes = dep.getElementsByTagName("artifactId");
+                if (artifactIdNodes.getLength() > 0) {
+                    artifactIds.add(artifactIdNodes.item(0).getTextContent().trim());
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter", "Could not read dependencies from " + pomFile + ": " + e.getMessage());
+        }
+        return artifactIds;
+    }
+
+    /**
      * Reads module names from a Maven pom.xml.
      */
     private static List<String> readMavenModules(Path pomFile) {
@@ -419,9 +597,30 @@ public class ProjectImporter {
 
     /**
      * Imports a project from a specific path. Can be called at any time to add projects.
+     * After importing, sets up inter-project dependencies with all existing workspace projects.
      */
     public static List<IProject> importFromPath(Path path, IProgressMonitor monitor) {
-        return importFromDirectory(path, monitor);
+        List<IProject> imported = importFromDirectory(path, monitor);
+
+        // When adding projects later, wire up dependencies with ALL workspace projects
+        if (!imported.isEmpty()) {
+            try {
+                IJavaProject[] allJavaProjects = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                        .getJavaProjects();
+                List<IProject> allProjects = new ArrayList<>();
+                for (IJavaProject jp : allJavaProjects) {
+                    allProjects.add(jp.getProject());
+                }
+                if (allProjects.size() > 1) {
+                    setupInterProjectDependencies(allProjects, monitor);
+                }
+            } catch (Exception e) {
+                McpLogger.warn("ProjectImporter",
+                        "Could not set up cross-repo dependencies: " + e.getMessage());
+            }
+        }
+
+        return imported;
     }
 
     /**

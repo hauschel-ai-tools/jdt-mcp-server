@@ -127,7 +127,7 @@ public class RefactoringTools {
 
             // Configure additional options based on element type
             if (element instanceof IType) {
-                descriptor.setUpdateQualifiedNames(true);
+                descriptor.setUpdateQualifiedNames(false);
                 descriptor.setUpdateSimilarDeclarations(false);
             } else if (element instanceof IMethod) {
                 descriptor.setKeepOriginal(false);
@@ -137,16 +137,20 @@ public class RefactoringTools {
                 descriptor.setRenameSetters(true);
             }
 
-            // Create the refactoring
-            RefactoringStatus status = new RefactoringStatus();
-            Refactoring refactoring = descriptor.createRefactoring(status);
-
-            if (refactoring == null) {
-                return new CallToolResult("Could not create refactoring: " + status.toString(), true);
-            }
-
-            // Check preconditions
+            // Create and check the refactoring. If participant errors occur (headless mode),
+            // retry once — participants self-remove after first failure, so retry succeeds cleanly.
+            Refactoring refactoring = createAndCheckRefactoring(descriptor);
             RefactoringStatus checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+
+            boolean hadParticipantErrors = hasParticipantErrors(checkStatus);
+            List<String> realErrors = getRealErrors(checkStatus);
+
+            if (hadParticipantErrors && realErrors.isEmpty()) {
+                // Participant errors corrupted the refactoring state — rebuild and retry
+                refactoring = createAndCheckRefactoring(descriptor);
+                checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+                realErrors = getRealErrors(checkStatus);
+            }
 
             Map<String, Object> result = new HashMap<>();
             result.put("elementName", elementName);
@@ -154,15 +158,16 @@ public class RefactoringTools {
             result.put("elementType", elementType);
             result.put("updateReferences", updateReferences);
 
-            if (checkStatus.hasError()) {
+            if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Refactoring has errors: " + checkStatus.toString());
-                result.put("errors", extractStatusMessages(checkStatus));
+                result.put("message", "Refactoring has errors: " + String.join("; ", realErrors));
+                result.put("errors", realErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            if (checkStatus.hasWarning()) {
-                result.put("warnings", extractStatusMessages(checkStatus));
+            List<String> warnings = getNonParticipantWarnings(checkStatus);
+            if (!warnings.isEmpty()) {
+                result.put("warnings", warnings);
             }
 
             if (previewOnly) {
@@ -176,11 +181,24 @@ public class RefactoringTools {
 
             // Execute the refactoring
             Change change = refactoring.createChange(new NullProgressMonitor());
+            // Capture change description BEFORE perform (perform may clear children)
+            Map<String, Object> changeDesc = describeChange(change);
             change.perform(new NullProgressMonitor());
+            result.put("changes", changeDesc);
 
-            result.put("status", "SUCCESS");
-            result.put("message", "Refactoring completed successfully");
-            result.put("changes", describeChange(change));
+            // Warn if no references were updated (declaration-only rename)
+            int childCount = changeDesc.containsKey("childCount")
+                    ? ((Number) changeDesc.get("childCount")).intValue() : -1;
+            if (childCount == 0 && updateReferences) {
+                result.put("status", "WARNING");
+                result.put("message",
+                        "Rename applied to declaration only — no references were updated. " +
+                        "This may indicate missing inter-project dependencies in the workspace. " +
+                        "Try running jdt_maven_update_project or re-importing projects.");
+            } else {
+                result.put("status", "SUCCESS");
+                result.put("message", "Refactoring completed successfully");
+            }
 
             // Add element details
             if (element.getResource() != null) {
@@ -290,10 +308,11 @@ public class RefactoringTools {
             result.put("selectedCode", selectedText);
             result.put("lineCount", selectedText.split("\n").length);
 
-            if (checkStatus.hasError()) {
+            List<String> extractErrors = getRealErrors(checkStatus);
+            if (!extractErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Extract method has errors: " + checkStatus.toString());
-                result.put("errors", extractStatusMessages(checkStatus));
+                result.put("message", "Extract method has errors: " + String.join("; ", extractErrors));
+                result.put("errors", extractErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
@@ -421,15 +440,17 @@ public class RefactoringTools {
             result.put("targetPackage", targetPackage);
             result.put("updateReferences", updateReferences);
 
-            if (checkStatus.hasError()) {
+            List<String> moveErrors = getRealErrors(checkStatus);
+            if (!moveErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Move refactoring has errors: " + checkStatus.toString());
-                result.put("errors", extractStatusMessages(checkStatus));
+                result.put("message", "Move refactoring has errors: " + String.join("; ", moveErrors));
+                result.put("errors", moveErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            if (checkStatus.hasWarning()) {
-                result.put("warnings", extractStatusMessages(checkStatus));
+            List<String> moveWarnings = getNonParticipantWarnings(checkStatus);
+            if (!moveWarnings.isEmpty()) {
+                result.put("warnings", moveWarnings);
             }
 
             if (previewOnly) {
@@ -707,9 +728,10 @@ public class RefactoringTools {
                 // Inline local variable
                 RefactoringStatus checkStatus = inlineTemp.checkAllConditions(new NullProgressMonitor());
 
-                if (checkStatus.hasError()) {
+                List<String> inlineErrors = getRealErrors(checkStatus);
+                if (!inlineErrors.isEmpty()) {
                     result.put("status", "ERROR");
-                    result.put("message", "Inline has errors: " + checkStatus.toString());
+                    result.put("message", "Inline has errors: " + String.join("; ", inlineErrors));
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
 
@@ -1543,6 +1565,60 @@ public class RefactoringTools {
     private static List<String> extractStatusMessages(RefactoringStatus status) {
         return java.util.Arrays.stream(status.getEntries())
                 .map(entry -> entry.getMessage())
+                .toList();
+    }
+
+    /**
+     * Creates a Refactoring from a descriptor, throwing if creation fails.
+     */
+    private static Refactoring createAndCheckRefactoring(RenameJavaElementDescriptor descriptor) throws Exception {
+        RefactoringStatus status = new RefactoringStatus();
+        Refactoring refactoring = descriptor.createRefactoring(status);
+        if (refactoring == null) {
+            throw new IllegalStateException("Could not create refactoring: " + status.toString());
+        }
+        return refactoring;
+    }
+
+    /**
+     * Checks if a RefactoringStatus contains participant errors (harmless in headless mode).
+     */
+    private static boolean hasParticipantErrors(RefactoringStatus status) {
+        for (var entry : status.getEntries()) {
+            if (entry.getMessage() != null && entry.getMessage().contains("participant")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks refactoring status for real errors, filtering out harmless participant
+     * errors that occur in headless mode (Launch/Breakpoint/Watchpoint participants).
+     * Returns list of real error messages, or empty list if only participant errors.
+     */
+    private static List<String> getRealErrors(RefactoringStatus status) {
+        if (!status.hasError()) {
+            return List.of();
+        }
+        List<String> realErrors = new java.util.ArrayList<>();
+        for (var entry : status.getEntries()) {
+            if (entry.getSeverity() >= RefactoringStatus.ERROR) {
+                if (entry.getMessage() == null || !entry.getMessage().contains("participant")) {
+                    realErrors.add(entry.getMessage());
+                }
+            }
+        }
+        return realErrors;
+    }
+
+    /**
+     * Extract non-participant warnings from refactoring status.
+     */
+    private static List<String> getNonParticipantWarnings(RefactoringStatus status) {
+        return java.util.Arrays.stream(status.getEntries())
+                .map(entry -> entry.getMessage())
+                .filter(msg -> msg == null || !msg.contains("participant"))
                 .toList();
     }
 
