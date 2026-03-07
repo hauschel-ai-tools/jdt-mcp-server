@@ -133,8 +133,11 @@ public class RefactoringTools {
                 descriptor.setKeepOriginal(false);
                 descriptor.setDeprecateDelegate(false);
             } else if (element instanceof IField) {
-                descriptor.setRenameGetters(true);
-                descriptor.setRenameSetters(true);
+                // Don't rename getters/setters automatically — in headless mode,
+                // ProjectScope.getNode() throws IllegalArgumentException because
+                // project preferences are not initialized (#20)
+                descriptor.setRenameGetters(false);
+                descriptor.setRenameSetters(false);
             }
 
             // Create and check the refactoring. If participant errors occur (headless mode),
