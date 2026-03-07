@@ -37,6 +37,7 @@ import org.eclipse.ltk.core.refactoring.Refactoring;
 import org.eclipse.ltk.core.refactoring.RefactoringContribution;
 import org.eclipse.ltk.core.refactoring.RefactoringCore;
 import org.eclipse.ltk.core.refactoring.RefactoringStatus;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -140,18 +141,46 @@ public class RefactoringTools {
                 descriptor.setRenameSetters(false);
             }
 
-            // Create and check the refactoring. If participant errors occur (headless mode),
-            // retry once — participants self-remove after first failure, so retry succeeds cleanly.
+            // Create and check the refactoring.
+            // For field renames, checkAllConditions may throw IllegalArgumentException
+            // from ProjectScope.getNode() in headless mode (#22) — handled below.
+            // For participant errors (headless mode), retry once — participants self-remove after first failure.
+            boolean isFieldRename = element instanceof IField;
             Refactoring refactoring = createAndCheckRefactoring(descriptor);
-            RefactoringStatus checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+            RefactoringStatus checkStatus;
+            boolean usedInitialConditionsOnly = false;
+            try {
+                checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+            } catch (IllegalArgumentException e) {
+                if (!isFieldRename) {
+                    throw e;
+                }
+                // In headless mode, ProjectScope.getNode() throws IllegalArgumentException
+                // when Eclipse internally resolves getter/setter names during field rename (#22).
+                // Create a fresh refactoring (old one may be corrupted) and check initial conditions only.
+                McpLogger.warn("RefactoringTools",
+                        "Field rename: checkAllConditions failed with IllegalArgumentException "
+                        + "(headless ProjectScope issue #22), proceeding with initial conditions only");
+                refactoring = createAndCheckRefactoring(descriptor);
+                checkStatus = refactoring.checkInitialConditions(new NullProgressMonitor());
+                usedInitialConditionsOnly = true;
+            }
 
             boolean hadParticipantErrors = hasParticipantErrors(checkStatus);
             List<String> realErrors = getRealErrors(checkStatus);
 
-            if (hadParticipantErrors && realErrors.isEmpty()) {
+            if (hadParticipantErrors && realErrors.isEmpty() && !usedInitialConditionsOnly) {
                 // Participant errors corrupted the refactoring state — rebuild and retry
                 refactoring = createAndCheckRefactoring(descriptor);
-                checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+                try {
+                    checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+                } catch (IllegalArgumentException e) {
+                    if (!isFieldRename) {
+                        throw e;
+                    }
+                    refactoring = createAndCheckRefactoring(descriptor);
+                    checkStatus = refactoring.checkInitialConditions(new NullProgressMonitor());
+                }
                 realErrors = getRealErrors(checkStatus);
             }
 
