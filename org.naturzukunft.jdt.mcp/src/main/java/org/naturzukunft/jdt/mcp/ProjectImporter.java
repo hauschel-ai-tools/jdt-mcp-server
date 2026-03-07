@@ -45,21 +45,21 @@ public class ProjectImporter {
             return imported;
         }
 
-        Path projectFile = directory.resolve(".project");
         Path pomFile = directory.resolve("pom.xml");
+        Path projectFile = directory.resolve(".project");
 
-        if (Files.exists(projectFile)) {
-            // Existing Eclipse project — import as-is
-            IProject project = importExistingProject(directory, monitor);
-            if (project != null) {
-                imported.add(project);
-            }
-        } else if (Files.exists(pomFile)) {
-            // Maven project
+        if (Files.exists(pomFile)) {
+            // Maven project (check BEFORE .project — Maven projects often have .project too)
             imported.addAll(importMavenProject(directory, monitor));
         } else if (isGradleProject(directory)) {
             // Gradle project
             IProject project = importGradleProject(directory, monitor);
+            if (project != null) {
+                imported.add(project);
+            }
+        } else if (Files.exists(projectFile)) {
+            // Eclipse project without Maven/Gradle
+            IProject project = importExistingProject(directory, monitor);
             if (project != null) {
                 imported.add(project);
             }
@@ -388,15 +388,15 @@ public class ProjectImporter {
                     continue;
                 }
 
-                if (Files.exists(subDir.resolve(".project"))) {
-                    IProject project = importExistingProject(subDir, monitor);
-                    if (project != null) {
-                        imported.add(project);
-                    }
-                } else if (Files.exists(subDir.resolve("pom.xml"))) {
+                if (Files.exists(subDir.resolve("pom.xml"))) {
                     imported.addAll(importMavenProject(subDir, monitor));
                 } else if (isGradleProject(subDir)) {
                     IProject project = importGradleProject(subDir, monitor);
+                    if (project != null) {
+                        imported.add(project);
+                    }
+                } else if (Files.exists(subDir.resolve(".project"))) {
+                    IProject project = importExistingProject(subDir, monitor);
                     if (project != null) {
                         imported.add(project);
                     }
