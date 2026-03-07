@@ -36,6 +36,34 @@ public class ProjectInfoTools {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
+     * Tool: Get server version.
+     */
+    public static ToolRegistration getVersionTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(),
+                List.of(),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_get_version",
+                "Get the JDT MCP Server version. Returns the version string (e.g. '0.2.0') or 'development' for local builds.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> {
+            Map<String, Object> result = new HashMap<>();
+            result.put("version", org.naturzukunft.jdt.mcp.VersionInfo.getVersion());
+            result.put("serverName", "Eclipse JDT MCP Server");
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(result), false);
+            } catch (Exception e) {
+                return new CallToolResult("Error: " + e.getMessage(), true);
+            }
+        });
+    }
+
+    /**
      * Tool: List all Java projects in workspace.
      */
     public static ToolRegistration listProjectsTool() {

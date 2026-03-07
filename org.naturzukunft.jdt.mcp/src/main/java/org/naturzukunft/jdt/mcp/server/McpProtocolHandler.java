@@ -27,7 +27,7 @@ public class McpProtocolHandler {
     private static final String JSONRPC_VERSION = "2.0";
     private static final String MCP_VERSION = "2024-11-05";
     private static final String SERVER_NAME = "Eclipse JDT MCP Server";
-    private static final String SERVER_VERSION = "1.0.0";
+    private static final String SERVER_VERSION = org.naturzukunft.jdt.mcp.VersionInfo.getVersion();
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, ToolRegistration> tools = new HashMap<>();

@@ -105,6 +105,7 @@ public class McpServerManager {
             NavigationTools.findCallersTool(),
 
             // Project Info Tools
+            ProjectInfoTools.getVersionTool(),
             ProjectInfoTools.listProjectsTool(),
             ProjectInfoTools.getClasspathTool(),
             ProjectInfoTools.getCompilationErrorsTool(),
