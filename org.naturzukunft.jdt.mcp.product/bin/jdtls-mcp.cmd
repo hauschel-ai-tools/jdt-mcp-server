@@ -8,7 +8,7 @@ REM   jdtls-mcp              # stdio mode (default, for Claude Code)
 REM   jdtls-mcp --http       # HTTP/SSE mode (for debugging)
 REM
 REM Environment variables:
-REM   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: %TEMP%\jdtls-mcp-<pid>)
+REM   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: %USERPROFILE%\.jdt-mcp\workspaces\<hash-of-cwd>)
 REM   JDTMCP_TRANSPORT  - Transport: stdio or http (default: stdio)
 REM   JAVA_HOME         - Java installation to use
 REM
@@ -36,11 +36,12 @@ for %%a in (%*) do (
     if "%%a"=="--http" set "TRANSPORT=http"
 )
 
-REM Workspace directory
-if not defined JDTMCP_WORKSPACE (
-    set "WORKSPACE=%TEMP%\jdtls-mcp-%RANDOM%"
-) else (
+REM Workspace directory - persistent per working directory
+if defined JDTMCP_WORKSPACE (
     set "WORKSPACE=%JDTMCP_WORKSPACE%"
+) else (
+    for /f "tokens=*" %%h in ('powershell -NoProfile -Command "[System.BitConverter]::ToString([System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes('%CD%'))).Replace('-','')"') do set "CWD_HASH=%%h"
+    set "WORKSPACE=%USERPROFILE%\.jdt-mcp\workspaces\!CWD_HASH!"
 )
 
 REM Find Java

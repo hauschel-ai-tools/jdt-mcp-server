@@ -207,7 +207,7 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 | Umgebungsvariable | Beschreibung | Standard |
 |-------------------|-------------|----------|
 | `JDTMCP_TRANSPORT` | Transport: `stdio` oder `http` | `stdio` |
-| `JDTMCP_WORKSPACE` | Eclipse Workspace-Verzeichnis | `/tmp/jdtls-mcp-<pid>` |
+| `JDTMCP_WORKSPACE` | Eclipse Workspace-Verzeichnis | `~/.jdt-mcp/workspaces/<hash>` |
 | `JDTMCP_SOURCE` | Download-Quelle für install.sh: `forgejo` oder `github` | auto-detect |
 | `JAVA_HOME` | Java-Installation | System-Java |
 

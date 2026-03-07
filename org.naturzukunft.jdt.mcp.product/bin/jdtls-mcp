@@ -8,7 +8,7 @@
 #   jdtls-mcp --http       # HTTP/SSE mode (for debugging)
 #
 # Environment variables:
-#   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: /tmp/jdtls-mcp-<pid>)
+#   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: ~/.jdt-mcp/workspaces/<hash-of-cwd>)
 #   JDTMCP_TRANSPORT  - Transport: stdio or http (default: stdio)
 #   JAVA_HOME         - Java installation to use
 #
@@ -39,8 +39,17 @@ for arg in "$@"; do
     esac
 done
 
-# Workspace directory
-WORKSPACE="${JDTMCP_WORKSPACE:-/tmp/jdtls-mcp-$$}"
+# Workspace directory - persistent per working directory
+if [ -n "${JDTMCP_WORKSPACE:-}" ]; then
+    WORKSPACE="$JDTMCP_WORKSPACE"
+else
+    if command -v md5sum >/dev/null 2>&1; then
+        CWD_HASH=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+    else
+        CWD_HASH=$(printf '%s' "$PWD" | md5 -q)
+    fi
+    WORKSPACE="$HOME/.jdt-mcp/workspaces/$CWD_HASH"
+fi
 
 # Find Java
 if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
