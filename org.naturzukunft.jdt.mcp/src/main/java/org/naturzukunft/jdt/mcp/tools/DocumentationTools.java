@@ -247,7 +247,9 @@ public class DocumentationTools {
                 }
                 scope = SearchEngine.createJavaSearchScope(new IJavaElement[] { project });
             } else {
-                scope = SearchEngine.createWorkspaceScope();
+                IJavaProject[] allProjects = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                        .getJavaProjects();
+                scope = SearchEngine.createJavaSearchScope(allProjects);
             }
 
             // Search for annotation type references

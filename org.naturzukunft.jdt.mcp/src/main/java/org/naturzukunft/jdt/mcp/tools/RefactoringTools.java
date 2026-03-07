@@ -210,12 +210,28 @@ public class RefactoringTools {
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
             error.put("status", "ERROR");
-            error.put("message", "Error during rename: " + e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            if (e.getCause() != null) {
+                msg += " caused by: " + e.getCause();
+            }
+            error.put("message", "Error during rename: " + msg);
             error.put("exceptionType", e.getClass().getSimpleName());
+
+            // Include stack trace summary for debugging
+            StackTraceElement[] stack = e.getStackTrace();
+            if (stack.length > 0) {
+                int limit = Math.min(stack.length, 5);
+                List<String> frames = new java.util.ArrayList<>();
+                for (int i = 0; i < limit; i++) {
+                    frames.add(stack[i].toString());
+                }
+                error.put("stackTrace", frames);
+            }
+
             try {
                 return new CallToolResult(MAPPER.writeValueAsString(error), true);
             } catch (Exception ex) {
-                return new CallToolResult("Error during rename: " + e.getMessage(), true);
+                return new CallToolResult("Error during rename: " + msg, true);
             }
         }
     }

@@ -246,24 +246,24 @@ public class CodeAnalysisTools {
 
     private static CallToolResult findReferences(String elementName, String elementType) {
         try {
-            int searchFor = switch (elementType.toUpperCase()) {
-                case "CLASS" -> IJavaSearchConstants.CLASS;
-                case "METHOD" -> IJavaSearchConstants.METHOD;
-                case "FIELD" -> IJavaSearchConstants.FIELD;
-                default -> IJavaSearchConstants.TYPE;
-            };
+            // Resolve element via Java model for reliable cross-module search
+            IJavaElement element = resolveElement(elementName, elementType);
+            if (element == null) {
+                return new CallToolResult("Element not found: " + elementName + " (type: " + elementType + ")", true);
+            }
 
             SearchPattern pattern = SearchPattern.createPattern(
-                    elementName,
-                    searchFor,
-                    IJavaSearchConstants.REFERENCES,
-                    SearchPattern.R_EXACT_MATCH);
+                    element,
+                    IJavaSearchConstants.REFERENCES);
 
             if (pattern == null) {
                 return new CallToolResult("Could not create search pattern for: " + elementName, true);
             }
 
-            IJavaSearchScope scope = SearchEngine.createWorkspaceScope();
+            // Explicit scope with all projects for cross-module resolution
+            IJavaProject[] allProjects = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                    .getJavaProjects();
+            IJavaSearchScope scope = SearchEngine.createJavaSearchScope(allProjects);
 
             List<Map<String, Object>> references = new ArrayList<>();
             SearchRequestor requestor = new SearchRequestor() {
@@ -407,6 +407,56 @@ public class CodeAnalysisTools {
 
         } catch (Exception e) {
             return new CallToolResult("Error getting source: " + e.getMessage(), true);
+        }
+    }
+
+    /**
+     * Resolves a Java element (type, method, or field) from a qualified name.
+     */
+    private static IJavaElement resolveElement(String elementName, String elementType) {
+        try {
+            String className;
+            String memberName = null;
+
+            if (elementName.contains("#")) {
+                String[] parts = elementName.split("#", 2);
+                className = parts[0];
+                memberName = parts[1];
+            } else {
+                className = elementName;
+            }
+
+            IType type = findType(className);
+            if (type == null) {
+                return null;
+            }
+
+            return switch (elementType.toUpperCase()) {
+                case "CLASS", "TYPE", "INTERFACE", "ENUM" -> type;
+                case "METHOD" -> {
+                    if (memberName != null) {
+                        for (IMethod method : type.getMethods()) {
+                            if (method.getElementName().equals(memberName)) {
+                                yield method;
+                            }
+                        }
+                    }
+                    yield null;
+                }
+                case "FIELD" -> {
+                    if (memberName != null) {
+                        IField field = type.getField(memberName);
+                        if (field != null && field.exists()) {
+                            yield field;
+                        }
+                    }
+                    yield null;
+                }
+                default -> null;
+            };
+        } catch (Exception e) {
+            System.err.println("[JDT MCP] Error resolving element: " + e.getMessage());
+            return null;
         }
     }
 

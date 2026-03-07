@@ -343,13 +343,15 @@ public class NavigationTools {
 
             List<Map<String, Object>> callers = new ArrayList<>();
 
-            // Search for references
+            // Search for references across all projects
             SearchEngine engine = new SearchEngine();
             SearchPattern pattern = SearchPattern.createPattern(
                     targetMethod,
                     IJavaSearchConstants.REFERENCES);
 
-            IJavaSearchScope scope = SearchEngine.createWorkspaceScope();
+            IJavaProject[] allProjects = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                    .getJavaProjects();
+            IJavaSearchScope scope = SearchEngine.createJavaSearchScope(allProjects);
 
             SearchRequestor requestor = new SearchRequestor() {
                 @Override
