@@ -202,6 +202,10 @@ public class RefactoringTools {
                 result.put("warnings", warnings);
             }
 
+            // In headless mode, checkFinalConditions may not have run (IAE fallback #22),
+            // leaving fParticipants null. createChange() would NPE (#24).
+            ensureParticipantsInitialized(refactoring);
+
             if (previewOnly) {
                 // Preview mode - just return what would be changed
                 Change change = refactoring.createChange(new NullProgressMonitor());
@@ -1626,6 +1630,31 @@ public class RefactoringTools {
             throw new IllegalStateException("Could not create refactoring: " + status.toString());
         }
         return refactoring;
+    }
+
+    /**
+     * Ensures that the internal fParticipants list is initialized in a ProcessorBasedRefactoring.
+     * In headless mode, checkFinalConditions may throw IllegalArgumentException before initializing
+     * fParticipants, causing createChange() to throw NPE (#24). This method uses reflection to
+     * set fParticipants to an empty list if it is still null.
+     */
+    private static void ensureParticipantsInitialized(Refactoring refactoring) {
+        try {
+            var clazz = Class.forName("org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring");
+            if (!clazz.isInstance(refactoring)) {
+                return;
+            }
+            java.lang.reflect.Field field = clazz.getDeclaredField("fParticipants");
+            field.setAccessible(true);
+            if (field.get(refactoring) == null) {
+                field.set(refactoring, java.util.Collections.emptyList());
+                McpLogger.warn("RefactoringTools",
+                        "fParticipants was null — initialized to empty list via reflection (#24)");
+            }
+        } catch (Exception e) {
+            McpLogger.warn("RefactoringTools",
+                    "Could not check/initialize fParticipants: " + e.getMessage());
+        }
     }
 
     /**
