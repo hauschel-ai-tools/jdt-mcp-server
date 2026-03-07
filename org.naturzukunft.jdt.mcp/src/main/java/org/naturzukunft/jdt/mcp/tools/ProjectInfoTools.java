@@ -527,14 +527,15 @@ public class ProjectInfoTools {
                 "object",
                 Map.of("path", Map.of(
                         "type", "string",
-                        "description", "Absolute path to the project directory to import (must contain pom.xml or .project, or be a directory with Java sources)")),
+                        "description", "Absolute path to the project directory to import (Maven pom.xml, Gradle build.gradle, Eclipse .project, or directory with Java sources)")),
                 List.of("path"),
                 null, null, null);
 
         Tool tool = new Tool(
                 "jdt_import_project",
                 "Import a Java project from a directory into the workspace. " +
-                "Supports Maven projects (pom.xml), Eclipse projects (.project), and plain Java projects. " +
+                "Supports Maven projects (pom.xml), Gradle projects (build.gradle/build.gradle.kts), " +
+                "Eclipse projects (.project), and plain Java projects. " +
                 "For Maven multi-module projects, all modules are imported. " +
                 "Use this when jdt_list_projects shows 0 projects or to add additional projects.",
                 schema,

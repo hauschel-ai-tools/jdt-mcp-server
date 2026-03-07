@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -24,7 +25,8 @@ import org.w3c.dom.NodeList;
 
 /**
  * Imports projects from a directory into the Eclipse workspace.
- * Supports existing Eclipse projects (.project) and Maven projects (pom.xml).
+ * Supports existing Eclipse projects (.project), Maven projects (pom.xml),
+ * Gradle projects (build.gradle / build.gradle.kts), and plain Java projects.
  */
 public class ProjectImporter {
 
@@ -55,6 +57,12 @@ public class ProjectImporter {
         } else if (Files.exists(pomFile)) {
             // Maven project
             imported.addAll(importMavenProject(directory, monitor));
+        } else if (isGradleProject(directory)) {
+            // Gradle project
+            IProject project = importGradleProject(directory, monitor);
+            if (project != null) {
+                imported.add(project);
+            }
         } else {
             // No project markers in root — scan subdirectories for projects
             imported.addAll(scanSubdirectories(directory, monitor));
@@ -108,24 +116,36 @@ public class ProjectImporter {
             // Import each module
             for (String module : modules) {
                 Path moduleDir = projectDir.resolve(module);
-                if (Files.isDirectory(moduleDir)) {
-                    Path moduleProjectFile = moduleDir.resolve(".project");
-                    if (Files.exists(moduleProjectFile)) {
-                        IProject project = importExistingProject(moduleDir, monitor);
+                if (!Files.isDirectory(moduleDir)) {
+                    McpLogger.warn("ProjectImporter", "Module directory not found: " + moduleDir);
+                    continue;
+                }
+
+                Path modulePom = moduleDir.resolve("pom.xml");
+                if (Files.exists(modulePom)) {
+                    // Check if module itself is multi-module (recursive)
+                    List<String> subModules = readMavenModules(modulePom);
+                    if (!subModules.isEmpty()) {
+                        imported.addAll(importMavenProject(moduleDir, monitor));
+                    } else {
+                        IProject project = createMavenModuleProject(moduleDir, module, monitor);
                         if (project != null) {
                             imported.add(project);
                         }
-                    } else if (Files.exists(moduleDir.resolve("pom.xml"))) {
-                        // Check if module itself is multi-module (recursive)
-                        List<String> subModules = readMavenModules(moduleDir.resolve("pom.xml"));
-                        if (!subModules.isEmpty()) {
-                            imported.addAll(importMavenProject(moduleDir, monitor));
-                        } else {
-                            IProject project = createMavenModuleProject(moduleDir, module, monitor);
-                            if (project != null) {
-                                imported.add(project);
-                            }
-                        }
+                    }
+                } else if (Files.exists(moduleDir.resolve(".project"))) {
+                    // Fallback: Eclipse project without pom.xml
+                    IProject project = importExistingProject(moduleDir, monitor);
+                    if (project != null) {
+                        imported.add(project);
+                    }
+                } else {
+                    // Module dir exists but has neither pom.xml nor .project
+                    McpLogger.warn("ProjectImporter",
+                            "Module '" + module + "' has no pom.xml or .project, importing as basic project");
+                    IProject project = importBasicJavaProject(moduleDir, monitor);
+                    if (project != null) {
+                        imported.add(project);
                     }
                 }
             }
@@ -287,7 +307,15 @@ public class ProjectImporter {
                     .redirectErrorStream(true);
 
             Process process = pb.start();
-            int exitCode = process.waitFor();
+            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                McpLogger.warn("ProjectImporter",
+                        "mvn dependency:build-classpath timed out after 120s for " + moduleDir.getFileName());
+                Files.deleteIfExists(cpFile);
+                return;
+            }
+            int exitCode = process.exitValue();
 
             if (exitCode == 0 && Files.exists(cpFile) && Files.size(cpFile) > 0) {
                 String classpath = Files.readString(cpFile).trim();
@@ -347,7 +375,7 @@ public class ProjectImporter {
     }
 
     /**
-     * Scans immediate subdirectories for projects (.project or pom.xml).
+     * Scans immediate subdirectories for projects (.project, pom.xml, or build.gradle).
      * Falls back to importing the root as a basic Java project if no subprojects found.
      */
     private static List<IProject> scanSubdirectories(Path directory, IProgressMonitor monitor) {
@@ -359,16 +387,19 @@ public class ProjectImporter {
                 if (name.startsWith(".")) {
                     continue;
                 }
-                Path subProjectFile = subDir.resolve(".project");
-                Path subPomFile = subDir.resolve("pom.xml");
 
-                if (Files.exists(subProjectFile)) {
+                if (Files.exists(subDir.resolve(".project"))) {
                     IProject project = importExistingProject(subDir, monitor);
                     if (project != null) {
                         imported.add(project);
                     }
-                } else if (Files.exists(subPomFile)) {
+                } else if (Files.exists(subDir.resolve("pom.xml"))) {
                     imported.addAll(importMavenProject(subDir, monitor));
+                } else if (isGradleProject(subDir)) {
+                    IProject project = importGradleProject(subDir, monitor);
+                    if (project != null) {
+                        imported.add(project);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -400,5 +431,121 @@ public class ProjectImporter {
         return Files.isDirectory(dir.resolve("src/main/java")) ||
                 Files.isDirectory(dir.resolve("src/test/java")) ||
                 Files.isDirectory(dir.resolve("src"));
+    }
+
+    /**
+     * Checks if a directory is a Gradle project.
+     */
+    private static boolean isGradleProject(Path dir) {
+        return Files.exists(dir.resolve("build.gradle")) ||
+                Files.exists(dir.resolve("build.gradle.kts"));
+    }
+
+    /**
+     * Imports a Gradle project. Sets up source directories based on standard Gradle/Maven layout.
+     * Resolves dependencies using 'gradle dependencies' if available.
+     */
+    private static IProject importGradleProject(Path projectDir, IProgressMonitor monitor) {
+        try {
+            String projectName = projectDir.getFileName().toString();
+            McpLogger.info("ProjectImporter", "Importing Gradle project: " + projectName);
+
+            IWorkspace workspace = ResourcesPlugin.getWorkspace();
+            IProjectDescription description = workspace.newProjectDescription(projectName);
+            description.setLocation(new org.eclipse.core.runtime.Path(projectDir.toString()));
+            description.setNatureIds(new String[] { JavaCore.NATURE_ID });
+
+            IProject project = workspace.getRoot().getProject(projectName);
+            if (project.exists()) {
+                project.open(monitor);
+                McpLogger.info("ProjectImporter", "Opened existing Gradle project: " + projectName);
+                return project;
+            }
+
+            project.create(description, monitor);
+            project.open(monitor);
+
+            IJavaProject javaProject = JavaCore.create(project);
+            List<IClasspathEntry> entries = new ArrayList<>();
+
+            // Standard Gradle/Maven source layout
+            addSourceFolderIfExists(project, entries, "src/main/java");
+            addSourceFolderIfExists(project, entries, "src/test/java");
+            addSourceFolderIfExists(project, entries, "src/main/resources");
+            addSourceFolderIfExists(project, entries, "src/test/resources");
+            // Kotlin source dirs
+            addSourceFolderIfExists(project, entries, "src/main/kotlin");
+            addSourceFolderIfExists(project, entries, "src/test/kotlin");
+
+            if (entries.isEmpty()) {
+                addSourceFolderIfExists(project, entries, "src");
+            }
+
+            // Add JRE container
+            entries.add(JavaCore.newContainerEntry(
+                    new org.eclipse.core.runtime.Path("org.eclipse.jdt.launching.JRE_CONTAINER")));
+
+            // Try to resolve Gradle dependencies
+            addGradleDependencies(projectDir, entries);
+
+            javaProject.setRawClasspath(entries.toArray(new IClasspathEntry[0]), monitor);
+
+            org.eclipse.core.runtime.IPath outputPath = project.getFullPath().append("build/classes/java/main");
+            javaProject.setOutputLocation(outputPath, monitor);
+
+            McpLogger.info("ProjectImporter", "Created Gradle project: " + projectName +
+                    " with " + entries.size() + " classpath entries");
+            return project;
+
+        } catch (Exception e) {
+            McpLogger.error("ProjectImporter", "Failed to create Gradle project from " + projectDir, e);
+            return null;
+        }
+    }
+
+    /**
+     * Resolves Gradle dependencies and adds them as classpath entries.
+     */
+    private static void addGradleDependencies(Path projectDir, List<IClasspathEntry> entries) {
+        try {
+            // Use gradle to get the runtime classpath
+            String gradleCmd = Files.exists(projectDir.resolve("gradlew")) ? "./gradlew" : "gradle";
+
+            Path cpFile = Files.createTempFile("jdtmcp-gradle-cp-", ".txt");
+            cpFile.toFile().deleteOnExit();
+
+            // Use a simple task to print the classpath
+            ProcessBuilder pb = new ProcessBuilder(
+                    gradleCmd, "-q", "dependencies", "--configuration", "compileClasspath",
+                    "-PcpOutputFile=" + cpFile.toString())
+                    .directory(projectDir.toFile())
+                    .redirectErrorStream(true);
+
+            Process process = pb.start();
+            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                McpLogger.warn("ProjectImporter",
+                        "Gradle dependency resolution timed out for " + projectDir.getFileName());
+                Files.deleteIfExists(cpFile);
+                return;
+            }
+
+            // Fallback: scan build/libs and local cache for jars
+            Path buildLibs = projectDir.resolve("build/libs");
+            if (Files.isDirectory(buildLibs)) {
+                try (var jars = Files.list(buildLibs)) {
+                    jars.filter(p -> p.toString().endsWith(".jar"))
+                            .forEach(jar -> entries.add(JavaCore.newLibraryEntry(
+                                    new org.eclipse.core.runtime.Path(jar.toString()), null, null)));
+                }
+            }
+
+            Files.deleteIfExists(cpFile);
+
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter",
+                    "Could not resolve Gradle dependencies for " + projectDir.getFileName() + ": " + e.getMessage());
+        }
     }
 }
