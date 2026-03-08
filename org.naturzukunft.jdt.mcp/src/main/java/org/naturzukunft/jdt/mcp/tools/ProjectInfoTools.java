@@ -594,6 +594,13 @@ public class ProjectInfoTools {
 
             List<IProject> imported = ProjectImporter.importFromPath(projectPath, new NullProgressMonitor());
 
+            // Trigger build so JDT creates problem markers (compilation errors)
+            if (!imported.isEmpty()) {
+                ResourcesPlugin.getWorkspace().build(
+                        org.eclipse.core.resources.IncrementalProjectBuilder.INCREMENTAL_BUILD,
+                        new NullProgressMonitor());
+            }
+
             Map<String, Object> result = new HashMap<>();
             result.put("importedCount", imported.size());
             result.put("projects", imported.stream()

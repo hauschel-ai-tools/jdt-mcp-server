@@ -454,6 +454,21 @@ public class ExecutionTools {
                     if (libFile.exists()) {
                         classpathEntries.add(libFile.getAbsolutePath());
                     }
+                } else if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                    // Add dependent project's output directory to runtime classpath
+                    String depProjectName = entry.getPath().lastSegment();
+                    IProject depProject = ResourcesPlugin.getWorkspace().getRoot().getProject(depProjectName);
+                    if (depProject.exists()) {
+                        IJavaProject depJavaProject = JavaCore.create(depProject);
+                        if (depJavaProject != null && depJavaProject.exists()) {
+                            org.eclipse.core.runtime.IPath depOutput = depJavaProject.getOutputLocation();
+                            String relDepOutput = depOutput.removeFirstSegments(1).toString();
+                            File depOutputDir = new File(depProject.getLocation().toFile(), relDepOutput);
+                            if (depOutputDir.exists() && !classpathEntries.contains(depOutputDir.getAbsolutePath())) {
+                                classpathEntries.add(depOutputDir.getAbsolutePath());
+                            }
+                        }
+                    }
                 }
             }
 
