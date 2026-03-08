@@ -179,15 +179,14 @@ public class RefactoringTools {
 
             // Execute the refactoring
             Change change = refactoring.createChange(monitor);
-            // Capture change description BEFORE perform (perform may clear children)
+            // Count leaf changes BEFORE perform (perform may clear children)
+            int leafChangeCount = countLeafChanges(change);
             Map<String, Object> changeDesc = describeChange(change);
-            int childCount = changeDesc.containsKey("childCount")
-                    ? ((Number) changeDesc.get("childCount")).intValue() : -1;
 
             // If no changes were produced, fall back to AST-based rename
-            if (childCount == 0) {
+            if (leafChangeCount == 0) {
                 McpLogger.warn("RefactoringTools",
-                        "Processor produced empty change (childCount: 0)"
+                        "Processor produced empty change (leafChanges: 0)"
                         + (updateReferences ? " with updateReferences=true" : "")
                         + ", falling back to AST-based rename");
                 return renameViaAst(element, newName, updateReferences, previewOnly);
@@ -195,8 +194,20 @@ public class RefactoringTools {
 
             change.perform(monitor);
             result.put("changes", changeDesc);
-            result.put("status", "SUCCESS");
-            result.put("message", "Refactoring completed successfully");
+
+            // leafChangeCount == 1 means only the declaration was renamed, no references
+            if (updateReferences && leafChangeCount <= 1) {
+                McpLogger.warn("RefactoringTools",
+                        "Rename completed but leafChanges=" + leafChangeCount
+                        + " with updateReferences=true — no references were updated");
+                result.put("status", "WARNING");
+                result.put("message",
+                        "Rename completed but no references were updated (only the declaration was renamed). "
+                        + "Consider searching for remaining references manually.");
+            } else {
+                result.put("status", "SUCCESS");
+                result.put("message", "Refactoring completed successfully");
+            }
 
             if (element.getResource() != null) {
                 result.put("file", element.getResource().getLocation().toString());
@@ -1949,6 +1960,24 @@ public class RefactoringTools {
                 .map(entry -> entry.getMessage())
                 .filter(msg -> msg == null || !msg.contains("participant"))
                 .toList();
+    }
+
+    /**
+     * Count the total number of leaf (non-composite) changes in a change tree.
+     * For rename, each leaf typically represents one file modification.
+     */
+    private static int countLeafChanges(Change change) {
+        if (change == null) {
+            return 0;
+        }
+        if (change instanceof org.eclipse.ltk.core.refactoring.CompositeChange compositeChange) {
+            int count = 0;
+            for (Change child : compositeChange.getChildren()) {
+                count += countLeafChanges(child);
+            }
+            return count;
+        }
+        return 1;
     }
 
     /**
