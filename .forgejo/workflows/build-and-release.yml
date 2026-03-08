@@ -52,7 +52,7 @@ jobs:
           # Generate changelog from commits since last tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s" "$PREV_TAG..HEAD" --no-merges | head -20)
+            CHANGELOG=$(git log --pretty=format:"- %s" "$PREV_TAG..HEAD" --no-merges -20)
           else
             CHANGELOG="- Erster Release"
           fi
