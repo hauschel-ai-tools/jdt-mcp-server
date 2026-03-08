@@ -131,32 +131,17 @@ public class RefactoringTools {
 
             // Step 2: checkFinalConditions — THIS IS WHERE REFERENCES ARE SEARCHED.
             // Without this step, createChange() produces an empty CompositeChange.
-            // In headless mode, ProjectScope.getNode() may throw IllegalArgumentException
-            // because Eclipse preferences are not initialized. If that happens,
-            // initialize preferences and retry with a fresh refactoring.
+            // In headless mode, RenameFieldProcessor may throw IllegalArgumentException
+            // for interface fields (public static final in an interface). If that happens,
+            // fall back to AST-based rename which works reliably without Participants.
             try {
                 RefactoringStatus finalStatus = refactoring.checkFinalConditions(monitor);
                 checkStatus.merge(finalStatus);
             } catch (IllegalArgumentException e) {
+                String errorMsg = e.getMessage() != null ? e.getMessage() : e.toString();
                 McpLogger.warn("RefactoringTools",
-                        "checkFinalConditions threw IAE (headless preferences issue), "
-                        + "initializing preferences and retrying: " + e.getMessage());
-                initializeHeadlessPreferences(element);
-                // Old refactoring is corrupted — create fresh processor and refactoring
-                processor = createRenameProcessor(element, newName, updateReferences);
-                refactoring = new org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring(processor);
-                refactoring.checkInitialConditions(monitor);
-                try {
-                    RefactoringStatus retryStatus = refactoring.checkFinalConditions(monitor);
-                    checkStatus = retryStatus;
-                } catch (IllegalArgumentException e2) {
-                    McpLogger.warn("RefactoringTools",
-                            "checkFinalConditions failed again after preference init: " + e2.getMessage());
-                    return renameErrorResult(elementName, newName, elementType, updateReferences,
-                            "Rename failed in headless mode: checkFinalConditions throws "
-                            + "IllegalArgumentException even after preference initialization. "
-                            + "Root cause: " + e2.getMessage(), List.of(e2.getMessage()));
-                }
+                        "checkFinalConditions threw IAE, falling back to AST-based rename: " + errorMsg);
+                return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
             // Filter participant errors (harmless in headless mode — Launch/Breakpoint participants)
@@ -195,16 +180,11 @@ public class RefactoringTools {
             int childCount = changeDesc.containsKey("childCount")
                     ? ((Number) changeDesc.get("childCount")).intValue() : -1;
 
-            // Fail if no changes were produced — don't perform an empty change
+            // If no changes were produced, fall back to AST-based rename
             if (childCount == 0) {
-                result.put("status", "ERROR");
-                result.put("message",
-                        "Rename produced no changes (childCount: 0). "
-                        + "This may indicate that checkFinalConditions did not find any references, "
-                        + "or the element could not be renamed. "
-                        + "Try running jdt_maven_update_project or re-importing projects.");
-                result.put("changes", changeDesc);
-                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                McpLogger.warn("RefactoringTools",
+                        "Processor produced empty change (childCount: 0), falling back to AST-based rename");
+                return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
             change.perform(monitor);
@@ -1631,26 +1611,194 @@ public class RefactoringTools {
     }
 
     /**
-     * Initializes Eclipse preferences that are missing in headless mode.
-     * ProjectScope.getNode() needs an initialized IEclipsePreferences tree.
+     * AST-based rename fallback when the Refactoring Processor fails.
+     * Uses SearchEngine for reference finding + ASTRewrite for text changes.
+     * Works reliably in headless mode without Preferences or Participants.
+     * Typical trigger: interface fields where RenameFieldProcessor throws IAE.
      */
-    private static void initializeHeadlessPreferences(IJavaElement element) {
+    private static CallToolResult renameViaAst(IJavaElement element, String newName,
+            boolean updateReferences, boolean previewOnly) {
         try {
-            IJavaProject javaProject = element.getJavaProject();
-            if (javaProject != null) {
-                org.eclipse.core.resources.IProject project = javaProject.getProject();
-                org.eclipse.core.runtime.preferences.IScopeContext projectScope =
-                        new org.eclipse.core.resources.ProjectScope(project);
-                org.osgi.service.prefs.Preferences prefs =
-                        projectScope.getNode(JavaCore.PLUGIN_ID);
-                prefs.flush();
-                McpLogger.info("RefactoringTools",
-                        "Initialized headless preferences for project: " + project.getName());
+            ICompilationUnit cu = (ICompilationUnit) element.getAncestor(IJavaElement.COMPILATION_UNIT);
+            if (cu == null) {
+                return new CallToolResult("Element has no compilation unit", true);
             }
+
+            String oldName = element.getElementName();
+            NullProgressMonitor monitor = new NullProgressMonitor();
+            List<Map<String, Object>> changedFiles = new java.util.ArrayList<>();
+
+            // 1. Find all references via SearchEngine (before modifying anything)
+            List<org.eclipse.jdt.core.search.SearchMatch> allMatches = new java.util.ArrayList<>();
+            if (updateReferences) {
+                org.eclipse.jdt.core.search.SearchPattern pattern =
+                        org.eclipse.jdt.core.search.SearchPattern.createPattern(
+                                element,
+                                org.eclipse.jdt.core.search.IJavaSearchConstants.REFERENCES);
+                if (pattern != null) {
+                    org.eclipse.jdt.core.search.SearchEngine engine =
+                            new org.eclipse.jdt.core.search.SearchEngine();
+                    engine.search(
+                            pattern,
+                            new org.eclipse.jdt.core.search.SearchParticipant[] {
+                                    org.eclipse.jdt.core.search.SearchEngine.getDefaultSearchParticipant()
+                            },
+                            org.eclipse.jdt.core.search.SearchEngine.createWorkspaceScope(),
+                            new org.eclipse.jdt.core.search.SearchRequestor() {
+                                @Override
+                                public void acceptSearchMatch(org.eclipse.jdt.core.search.SearchMatch match) {
+                                    if (match.getAccuracy() == org.eclipse.jdt.core.search.SearchMatch.A_ACCURATE) {
+                                        allMatches.add(match);
+                                    }
+                                }
+                            },
+                            monitor);
+                }
+            }
+
+            // Group matches by CompilationUnit
+            Map<ICompilationUnit, List<org.eclipse.jdt.core.search.SearchMatch>> matchesByCU =
+                    new java.util.LinkedHashMap<>();
+            for (var match : allMatches) {
+                Object matchElement = match.getElement();
+                if (matchElement instanceof IJavaElement je) {
+                    ICompilationUnit matchCU = (ICompilationUnit) je.getAncestor(
+                            IJavaElement.COMPILATION_UNIT);
+                    if (matchCU != null) {
+                        matchesByCU.computeIfAbsent(matchCU, k -> new java.util.ArrayList<>())
+                                .add(match);
+                    }
+                }
+            }
+
+            // Preview mode — return what would change without modifying
+            if (previewOnly) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("status", "PREVIEW");
+                result.put("message", "Preview of AST-based rename");
+                result.put("oldName", oldName);
+                result.put("newName", newName);
+                result.put("fallback", true);
+
+                List<Map<String, Object>> previewChanges = new java.util.ArrayList<>();
+                previewChanges.add(Map.of(
+                        "file", cu.getResource().getLocation().toString(),
+                        "type", "declaration"));
+                for (var entry : matchesByCU.entrySet()) {
+                    ICompilationUnit refCU = entry.getKey();
+                    if (refCU.equals(cu)) continue;
+                    previewChanges.add(Map.of(
+                            "file", refCU.getResource().getLocation().toString(),
+                            "type", "reference",
+                            "matchCount", entry.getValue().size()));
+                }
+                result.put("changedFiles", previewChanges);
+                result.put("totalReferences", allMatches.size());
+                return new CallToolResult(MAPPER.writeValueAsString(result), false);
+            }
+
+            // 2. Rename the declaration using ASTRewrite
+            renameDeclarationViaAst(cu, element, newName, monitor);
+            changedFiles.add(Map.of(
+                    "file", cu.getResource().getLocation().toString(),
+                    "type", "declaration"));
+
+            // 3. Rename references in other compilation units
+            for (var entry : matchesByCU.entrySet()) {
+                ICompilationUnit refCU = entry.getKey();
+                if (refCU.equals(cu)) continue;
+                applyRenameEdits(refCU, entry.getValue(), oldName, newName, monitor);
+                changedFiles.add(Map.of(
+                        "file", refCU.getResource().getLocation().toString(),
+                        "type", "reference",
+                        "matchCount", entry.getValue().size()));
+            }
+
+            // Also handle references in the same CU as the declaration
+            List<org.eclipse.jdt.core.search.SearchMatch> sameCUMatches = matchesByCU.get(cu);
+            if (sameCUMatches != null && !sameCUMatches.isEmpty()) {
+                applyRenameEdits(cu, sameCUMatches, oldName, newName, monitor);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("status", "SUCCESS");
+            result.put("message", "Rename completed via AST-based fallback");
+            result.put("oldName", oldName);
+            result.put("newName", newName);
+            result.put("changedFiles", changedFiles);
+            result.put("totalReferences", allMatches.size());
+            result.put("fallback", true);
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
         } catch (Exception e) {
-            McpLogger.warn("RefactoringTools",
-                    "Could not initialize headless preferences: " + e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            error.put("message", "Error during AST-based rename: " + msg);
+            error.put("exceptionType", e.getClass().getSimpleName());
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception ex) {
+                return new CallToolResult("Error during AST-based rename: " + msg, true);
+            }
         }
+    }
+
+    /**
+     * Renames the element declaration in its compilation unit using ASTRewrite.
+     */
+    private static void renameDeclarationViaAst(ICompilationUnit cu, IJavaElement element,
+            String newName, NullProgressMonitor monitor) throws Exception {
+        String source = cu.getSource();
+        Document doc = new Document(source);
+
+        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+        parser.setSource(cu);
+        parser.setResolveBindings(true);
+        CompilationUnit ast = (CompilationUnit) parser.createAST(monitor);
+
+        ASTRewrite rewrite = ASTRewrite.create(ast.getAST());
+
+        ISourceRange nameRange = ((IMember) element).getNameRange();
+        org.eclipse.jdt.core.dom.ASTNode node =
+                org.eclipse.jdt.core.dom.NodeFinder.perform(ast, nameRange.getOffset(), nameRange.getLength());
+
+        if (node instanceof org.eclipse.jdt.core.dom.SimpleName simpleName) {
+            org.eclipse.jdt.core.dom.SimpleName newNode = ast.getAST().newSimpleName(newName);
+            rewrite.replace(simpleName, newNode, null);
+        }
+
+        TextEdit edits = rewrite.rewriteAST(doc, cu.getJavaProject().getOptions(true));
+        edits.apply(doc);
+
+        cu.getBuffer().setContents(doc.get());
+        cu.save(monitor, true);
+    }
+
+    /**
+     * Applies rename text edits for references found by SearchEngine.
+     * Matches are applied back-to-front to keep offsets stable.
+     */
+    private static void applyRenameEdits(ICompilationUnit cu,
+            List<org.eclipse.jdt.core.search.SearchMatch> matches,
+            String oldName, String newName, NullProgressMonitor monitor) throws Exception {
+        // Sort matches back-to-front so offsets remain stable
+        matches.sort((a, b) -> Integer.compare(b.getOffset(), a.getOffset()));
+
+        String source = cu.getSource();
+        StringBuilder sb = new StringBuilder(source);
+
+        for (var match : matches) {
+            int offset = match.getOffset();
+            int length = match.getLength();
+            String found = sb.substring(offset, offset + length);
+            if (found.equals(oldName)) {
+                sb.replace(offset, offset + length, newName);
+            }
+        }
+
+        cu.getBuffer().setContents(sb.toString());
+        cu.save(monitor, true);
     }
 
     /**
