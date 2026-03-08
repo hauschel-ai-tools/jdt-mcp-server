@@ -187,7 +187,9 @@ public class RefactoringTools {
             // If no changes were produced, fall back to AST-based rename
             if (childCount == 0) {
                 McpLogger.warn("RefactoringTools",
-                        "Processor produced empty change (childCount: 0), falling back to AST-based rename");
+                        "Processor produced empty change (childCount: 0)"
+                        + (updateReferences ? " with updateReferences=true" : "")
+                        + ", falling back to AST-based rename");
                 return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
@@ -1829,8 +1831,15 @@ public class RefactoringTools {
             }
 
             Map<String, Object> result = new HashMap<>();
-            result.put("status", "SUCCESS");
-            result.put("message", "Rename completed via AST-based fallback");
+            if (updateReferences && allMatches.isEmpty()) {
+                result.put("status", "WARNING");
+                result.put("message",
+                        "Rename applied to declaration only — no references found despite updateReferences=true. "
+                        + "Verify that the element has references in the workspace.");
+            } else {
+                result.put("status", "SUCCESS");
+                result.put("message", "Rename completed via AST-based fallback");
+            }
             result.put("oldName", oldName);
             result.put("newName", newName);
             result.put("changedFiles", changedFiles);
