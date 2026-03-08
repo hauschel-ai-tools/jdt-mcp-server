@@ -368,7 +368,8 @@ public class McpProtocolHandler {
     private static boolean isImportSafeTool(String toolName) {
         return "jdt_get_version".equals(toolName)
                 || "jdt_list_projects".equals(toolName)
-                || "jdt_import_project".equals(toolName);
+                || "jdt_import_project".equals(toolName)
+                || "jdt_reload_workspace".equals(toolName);
     }
 
     /**

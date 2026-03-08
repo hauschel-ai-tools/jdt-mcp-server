@@ -114,6 +114,7 @@ public class McpServerManager {
             ProjectInfoTools.mavenUpdateProjectTool(),
             ProjectInfoTools.importProjectTool(),
             ProjectInfoTools.removeProjectTool(),
+            ProjectInfoTools.reloadWorkspaceTool(),
 
             // Creation Tools
             CreationTools.createClassTool(),

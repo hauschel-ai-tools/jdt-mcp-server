@@ -22,7 +22,7 @@ import org.naturzukunft.jdt.mcp.server.McpStdioServer;
  */
 public class HeadlessApplication implements IApplication {
 
-    private static final CountDownLatch readyLatch = new CountDownLatch(1);
+    private static volatile CountDownLatch readyLatch = new CountDownLatch(1);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
     /**
@@ -39,6 +39,50 @@ public class HeadlessApplication implements IApplication {
      */
     public static boolean awaitReady(long timeout, TimeUnit unit) throws InterruptedException {
         return readyLatch.await(timeout, unit);
+    }
+
+    /**
+     * Reloads the workspace: removes all projects, re-imports from working directory, and rebuilds.
+     * Other tools are blocked via {@link #awaitReady(long, TimeUnit)} while reload is in progress.
+     *
+     * @return list of imported projects
+     */
+    public static List<IProject> reloadWorkspace() throws Exception {
+        McpLogger.info("HeadlessApplication", "Reload workspace requested");
+
+        // Block other tools during reload
+        readyLatch = new CountDownLatch(1);
+
+        try {
+            IWorkspace workspace = ResourcesPlugin.getWorkspace();
+
+            // Remove all projects from workspace (keep files on disk)
+            IProject[] existing = workspace.getRoot().getProjects();
+            McpLogger.info("HeadlessApplication", "Removing " + existing.length + " project(s) from workspace");
+            for (IProject project : existing) {
+                project.delete(false, true, new NullProgressMonitor());
+            }
+
+            // Re-import from working directory
+            String workDir = System.getProperty("user.dir");
+            List<IProject> projects = ProjectImporter.importFromDirectory(
+                    Path.of(workDir), new NullProgressMonitor());
+
+            McpLogger.info("HeadlessApplication", "Re-imported " + projects.size() + " project(s):");
+            for (IProject project : projects) {
+                McpLogger.info("HeadlessApplication", "  - " + project.getName() +
+                        " (" + project.getLocation() + ")");
+            }
+
+            // Rebuild
+            workspace.build(IncrementalProjectBuilder.FULL_BUILD, new NullProgressMonitor());
+            McpLogger.info("HeadlessApplication", "Workspace rebuild completed");
+
+            return projects;
+        } finally {
+            readyLatch.countDown();
+            McpLogger.info("HeadlessApplication", "Reload workspace finished — ready for requests");
+        }
     }
 
     @Override

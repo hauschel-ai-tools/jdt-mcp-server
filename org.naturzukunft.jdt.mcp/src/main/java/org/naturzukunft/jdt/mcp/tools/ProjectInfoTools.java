@@ -654,6 +654,49 @@ public class ProjectInfoTools {
     }
 
     /**
+     * Tool: Reload the entire workspace.
+     */
+    public static ToolRegistration reloadWorkspaceTool() {
+        JsonSchema schema = new JsonSchema(
+                "object",
+                Map.of(),
+                List.of(),
+                null, null, null);
+
+        Tool tool = new Tool(
+                "jdt_reload_workspace",
+                "Reload the entire workspace: removes all projects, re-imports from the working directory, and rebuilds. " +
+                "Use this when the workspace is corrupt, projects are missing, or after major changes to the project structure (e.g. new modules added). " +
+                "All other tools are blocked until reload completes. Files on disk are NOT deleted.",
+                schema,
+                null);
+
+        return new ToolRegistration(tool, (args, progress) -> reloadWorkspace(progress));
+    }
+
+    private static CallToolResult reloadWorkspace(org.naturzukunft.jdt.mcp.server.ProgressReporter progress) {
+        try {
+            progress.report(0, 3, "Removing existing projects...");
+            java.util.List<IProject> projects = org.naturzukunft.jdt.mcp.HeadlessApplication.reloadWorkspace();
+            progress.report(3, 3, "Reload complete");
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("status", "SUCCESS");
+            result.put("importedCount", projects.size());
+            result.put("projects", projects.stream()
+                    .map(p -> Map.of(
+                            "name", p.getName(),
+                            "location", p.getLocation().toString()))
+                    .toList());
+
+            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+
+        } catch (Exception e) {
+            return new CallToolResult("Error reloading workspace: " + e.getMessage(), true);
+        }
+    }
+
+    /**
      * Helper: Get IJavaProject by name.
      */
     private static IJavaProject getJavaProject(String projectName) {
