@@ -50,6 +50,11 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
  *
  * Note: Uses Eclipse internal refactoring APIs (discouraged access).
  * This is necessary to provide actual refactoring functionality.
+ *
+ * AI-HINT: This class was split as part of #30 (God Class refactoring).
+ * Shared helpers live in {@link RefactoringSupport}. When adding new
+ * refactoring tools, consider creating a separate class per concern
+ * instead of growing this file further. Keep separation of concerns!
  */
 @SuppressWarnings("restriction")
 public class RefactoringTools {
@@ -102,7 +107,7 @@ public class RefactoringTools {
             boolean updateReferences, boolean previewOnly) {
         try {
             // Find the element
-            IJavaElement element = findElement(elementName, elementType);
+            IJavaElement element = RefactoringSupport.findElement(elementName, elementType);
             if (element == null) {
                 return new CallToolResult("Element not found: " + elementName + " (type: " + elementType + ")", true);
             }
@@ -123,7 +128,7 @@ public class RefactoringTools {
             // Step 1: checkInitialConditions — validates the element can be renamed
             NullProgressMonitor monitor = new NullProgressMonitor();
             RefactoringStatus checkStatus = refactoring.checkInitialConditions(monitor);
-            List<String> initErrors = getRealErrors(checkStatus);
+            List<String> initErrors = RefactoringSupport.getRealErrors(checkStatus);
             if (!initErrors.isEmpty()) {
                 return renameErrorResult(elementName, newName, elementType, updateReferences,
                         "Initial conditions failed: " + String.join("; ", initErrors), initErrors);
@@ -149,7 +154,7 @@ public class RefactoringTools {
             }
 
             // Filter participant errors (harmless in headless mode — Launch/Breakpoint participants)
-            List<String> realErrors = getRealErrors(checkStatus);
+            List<String> realErrors = RefactoringSupport.getRealErrors(checkStatus);
 
             Map<String, Object> result = new HashMap<>();
             result.put("elementName", elementName);
@@ -164,7 +169,7 @@ public class RefactoringTools {
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            List<String> warnings = getNonParticipantWarnings(checkStatus);
+            List<String> warnings = RefactoringSupport.getNonParticipantWarnings(checkStatus);
             if (!warnings.isEmpty()) {
                 result.put("warnings", warnings);
             }
@@ -173,15 +178,15 @@ public class RefactoringTools {
                 Change change = refactoring.createChange(monitor);
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of rename refactoring");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
             // Execute the refactoring
             Change change = refactoring.createChange(monitor);
             // Count leaf changes BEFORE perform (perform may clear children)
-            int leafChangeCount = countLeafChanges(change);
-            Map<String, Object> changeDesc = describeChange(change);
+            int leafChangeCount = RefactoringSupport.countLeafChanges(change);
+            Map<String, Object> changeDesc = RefactoringSupport.describeChange(change);
 
             // If no changes were produced, fall back to AST-based rename
             if (leafChangeCount == 0) {
@@ -331,7 +336,7 @@ public class RefactoringTools {
             result.put("selectedCode", selectedText);
             result.put("lineCount", selectedText.split("\n").length);
 
-            List<String> extractErrors = getRealErrors(checkStatus);
+            List<String> extractErrors = RefactoringSupport.getRealErrors(checkStatus);
             if (!extractErrors.isEmpty()) {
                 result.put("status", "ERROR");
                 result.put("message", "Extract method has errors: " + String.join("; ", extractErrors));
@@ -340,14 +345,14 @@ public class RefactoringTools {
             }
 
             if (checkStatus.hasWarning()) {
-                result.put("warnings", extractStatusMessages(checkStatus));
+                result.put("warnings", RefactoringSupport.extractStatusMessages(checkStatus));
             }
 
             if (previewOnly) {
                 Change change = extractRefactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of extract method refactoring");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
@@ -357,7 +362,7 @@ public class RefactoringTools {
 
             result.put("status", "SUCCESS");
             result.put("message", "Extract method completed successfully");
-            result.put("changes", describeChange(change));
+            result.put("changes", RefactoringSupport.describeChange(change));
 
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
@@ -414,7 +419,7 @@ public class RefactoringTools {
             boolean updateReferences, boolean previewOnly) {
         try {
             // Find the type in its source project
-            IType type = findTypeInSourceProject(typeName);
+            IType type = RefactoringSupport.findTypeInSourceProject(typeName);
 
             if (type == null) {
                 return new CallToolResult("Type not found: " + typeName, true);
@@ -458,7 +463,7 @@ public class RefactoringTools {
             result.put("targetPackage", targetPackage);
             result.put("updateReferences", updateReferences);
 
-            List<String> moveErrors = getRealErrors(checkStatus);
+            List<String> moveErrors = RefactoringSupport.getRealErrors(checkStatus);
             if (!moveErrors.isEmpty()) {
                 result.put("status", "ERROR");
                 result.put("message", "Move refactoring has errors: " + String.join("; ", moveErrors));
@@ -466,7 +471,7 @@ public class RefactoringTools {
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            List<String> moveWarnings = getNonParticipantWarnings(checkStatus);
+            List<String> moveWarnings = RefactoringSupport.getNonParticipantWarnings(checkStatus);
             if (!moveWarnings.isEmpty()) {
                 result.put("warnings", moveWarnings);
             }
@@ -475,7 +480,7 @@ public class RefactoringTools {
                 Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of move refactoring");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
@@ -752,7 +757,7 @@ public class RefactoringTools {
                 if (!status.hasError()) {
                     RefactoringStatus checkStatus = inlineTemp.checkAllConditions(new NullProgressMonitor());
 
-                    List<String> inlineErrors = getRealErrors(checkStatus);
+                    List<String> inlineErrors = RefactoringSupport.getRealErrors(checkStatus);
                     if (!inlineErrors.isEmpty()) {
                         result.put("status", "ERROR");
                         result.put("message", "Inline has errors: " + String.join("; ", inlineErrors));
@@ -763,7 +768,7 @@ public class RefactoringTools {
                         Change change = inlineTemp.createChange(new NullProgressMonitor());
                         result.put("status", "PREVIEW");
                         result.put("inlineType", "LOCAL_VARIABLE");
-                        result.put("changes", describeChange(change));
+                        result.put("changes", RefactoringSupport.describeChange(change));
                         return new CallToolResult(MAPPER.writeValueAsString(result), false);
                     }
 
@@ -799,7 +804,7 @@ public class RefactoringTools {
                         if (!methodStatus.hasError()) {
                             RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
 
-                            List<String> inlineErrors = getRealErrors(checkStatus);
+                            List<String> inlineErrors = RefactoringSupport.getRealErrors(checkStatus);
                             if (!inlineErrors.isEmpty()) {
                                 result.put("status", "ERROR");
                                 result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
@@ -810,7 +815,7 @@ public class RefactoringTools {
                                 Change change = inlineMethod.createChange(new NullProgressMonitor());
                                 result.put("status", "PREVIEW");
                                 result.put("inlineType", "METHOD");
-                                result.put("changes", describeChange(change));
+                                result.put("changes", RefactoringSupport.describeChange(change));
                                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
                             }
 
@@ -885,7 +890,7 @@ public class RefactoringTools {
     private static CallToolResult extractInterface(String className, String interfaceName,
             List<String> methodNames, boolean previewOnly) {
         try {
-            IType type = findTypeInSourceProject(className);
+            IType type = RefactoringSupport.findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1114,7 +1119,7 @@ public class RefactoringTools {
             String newName, String newReturnType, List<Map<String, String>> addParameters,
             List<String> removeParameters, boolean previewOnly) {
         try {
-            IType type = findTypeInSourceProject(className);
+            IType type = RefactoringSupport.findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1183,7 +1188,7 @@ public class RefactoringTools {
             result.put("methodName", methodName);
             result.put("newName", newName != null ? newName : methodName);
 
-            List<String> realErrors = getRealErrors(status);
+            List<String> realErrors = RefactoringSupport.getRealErrors(status);
             if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
                 result.put("message", "Change signature has errors: " + String.join("; ", realErrors));
@@ -1193,7 +1198,7 @@ public class RefactoringTools {
             if (previewOnly) {
                 Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
@@ -1435,7 +1440,7 @@ public class RefactoringTools {
     private static CallToolResult encapsulateField(String className, String fieldName,
             boolean generateGetter, boolean generateSetter, boolean previewOnly) {
         try {
-            IType type = findTypeInSourceProject(className);
+            IType type = RefactoringSupport.findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1483,7 +1488,7 @@ public class RefactoringTools {
             if (previewOnly) {
                 Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
@@ -1571,7 +1576,7 @@ public class RefactoringTools {
             if (initialStatus.hasFatalError()) {
                 result.put("status", "ERROR");
                 result.put("message", "Cannot introduce parameter at this location");
-                result.put("errors", extractStatusMessages(initialStatus));
+                result.put("errors", RefactoringSupport.extractStatusMessages(initialStatus));
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
@@ -1587,18 +1592,18 @@ public class RefactoringTools {
             if (status.hasError()) {
                 result.put("status", "ERROR");
                 result.put("message", "Introduce parameter has errors: " + status.toString());
-                result.put("errors", extractStatusMessages(status));
+                result.put("errors", RefactoringSupport.extractStatusMessages(status));
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
             if (status.hasWarning()) {
-                result.put("warnings", extractStatusMessages(status));
+                result.put("warnings", RefactoringSupport.extractStatusMessages(status));
             }
 
             if (previewOnly) {
                 Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
-                result.put("changes", describeChange(change));
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
@@ -1625,15 +1630,6 @@ public class RefactoringTools {
         if (typeName.contains(".") && !typeName.startsWith("java.lang.")) {
             imports.add(typeName);
         }
-    }
-
-    /**
-     * Extract messages from RefactoringStatus.
-     */
-    private static List<String> extractStatusMessages(RefactoringStatus status) {
-        return java.util.Arrays.stream(status.getEntries())
-                .map(entry -> entry.getMessage())
-                .toList();
     }
 
     /**
@@ -1929,157 +1925,4 @@ public class RefactoringTools {
         }
     }
 
-    /**
-     * Checks refactoring status for real errors, filtering out harmless participant
-     * errors that occur in headless mode (Launch/Breakpoint/Watchpoint participants).
-     * Returns list of real error messages, or empty list if only participant errors.
-     */
-    private static List<String> getRealErrors(RefactoringStatus status) {
-        if (!status.hasError()) {
-            return List.of();
-        }
-        List<String> realErrors = new java.util.ArrayList<>();
-        for (var entry : status.getEntries()) {
-            if (entry.getSeverity() >= RefactoringStatus.ERROR) {
-                String msg = entry.getMessage();
-                // Skip harmless headless-mode errors
-                if (msg != null && msg.contains("participant")) continue;
-                // "potential matches" are informational, not blocking errors
-                if (msg != null && msg.toLowerCase().contains("potential match")) continue;
-                realErrors.add(msg);
-            }
-        }
-        return realErrors;
-    }
-
-    /**
-     * Extract non-participant warnings from refactoring status.
-     */
-    private static List<String> getNonParticipantWarnings(RefactoringStatus status) {
-        return java.util.Arrays.stream(status.getEntries())
-                .map(entry -> entry.getMessage())
-                .filter(msg -> msg == null || !msg.contains("participant"))
-                .toList();
-    }
-
-    /**
-     * Count the total number of leaf (non-composite) changes in a change tree.
-     * For rename, each leaf typically represents one file modification.
-     */
-    private static int countLeafChanges(Change change) {
-        if (change == null) {
-            return 0;
-        }
-        if (change instanceof org.eclipse.ltk.core.refactoring.CompositeChange compositeChange) {
-            int count = 0;
-            for (Change child : compositeChange.getChildren()) {
-                count += countLeafChanges(child);
-            }
-            return count;
-        }
-        return 1;
-    }
-
-    /**
-     * Describe the changes that would be made.
-     */
-    private static Map<String, Object> describeChange(Change change) {
-        Map<String, Object> desc = new HashMap<>();
-        if (change != null) {
-            desc.put("name", change.getName());
-
-            if (change instanceof org.eclipse.ltk.core.refactoring.CompositeChange compositeChange) {
-                List<Map<String, Object>> children = new java.util.ArrayList<>();
-                for (Change child : compositeChange.getChildren()) {
-                    children.add(describeChange(child));
-                }
-                desc.put("children", children);
-                desc.put("childCount", children.size());
-            }
-
-            // Try to get affected files
-            Object modifiedElement = change.getModifiedElement();
-            if (modifiedElement != null) {
-                desc.put("modifiedElement", modifiedElement.toString());
-            }
-        }
-        return desc;
-    }
-
-    /**
-     * Finds IType in the project that OWNS the source file (non-binary).
-     * This is critical for refactoring: the element must come from the
-     * declaring project so that ICompilationUnit is editable and bindings
-     * are resolved via source, not class files.
-     */
-    private static IType findTypeInSourceProject(String fullyQualifiedName) throws Exception {
-        IType fallback = null;
-        for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                .getJavaProjects()) {
-            if (!project.getProject().isOpen()) continue;
-            IType candidate = project.findType(fullyQualifiedName);
-            if (candidate == null) continue;
-            // Ideal: source type whose resource lives in this project
-            if (!candidate.isBinary() && candidate.getResource() != null) {
-                return candidate;
-            }
-            if (fallback == null) {
-                fallback = candidate;
-            }
-        }
-        return fallback;
-    }
-
-    /**
-     * Helper: Find a Java element by name and type.
-     */
-    private static IJavaElement findElement(String elementName, String elementType) {
-        try {
-            switch (elementType.toUpperCase()) {
-                case "CLASS", "INTERFACE", "ENUM", "TYPE" -> {
-                    return findTypeInSourceProject(elementName);
-                }
-                case "METHOD" -> {
-                    // Format: com.example.Class#methodName or com.example.Class.methodName
-                    int separator = elementName.lastIndexOf('#');
-                    if (separator == -1) {
-                        separator = elementName.lastIndexOf('.');
-                    }
-                    if (separator > 0) {
-                        String className = elementName.substring(0, separator);
-                        String methodNamePart = elementName.substring(separator + 1);
-                        IType type = findTypeInSourceProject(className);
-                        if (type != null) {
-                            for (IMethod method : type.getMethods()) {
-                                if (method.getElementName().equals(methodNamePart)) {
-                                    return method;
-                                }
-                            }
-                        }
-                    }
-                }
-                case "FIELD" -> {
-                    // Format: com.example.Class#fieldName or com.example.Class.fieldName
-                    int separator = elementName.lastIndexOf('#');
-                    if (separator == -1) {
-                        separator = elementName.lastIndexOf('.');
-                    }
-                    if (separator > 0) {
-                        String className = elementName.substring(0, separator);
-                        String fieldNamePart = elementName.substring(separator + 1);
-                        IType type = findTypeInSourceProject(className);
-                        if (type != null) {
-                            IField field = type.getField(fieldNamePart);
-                            if (field != null && field.exists()) {
-                                return field;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding element: " + e.getMessage());
-        }
-        return null;
-    }
 }
