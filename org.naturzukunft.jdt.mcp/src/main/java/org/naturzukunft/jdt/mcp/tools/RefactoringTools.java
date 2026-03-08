@@ -776,22 +776,48 @@ public class RefactoringTools {
             org.eclipse.jdt.core.dom.CompilationUnit astRoot =
                 (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(new NullProgressMonitor());
 
-            org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring inlineMethod =
-                org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
+            // Try creating InlineMethodRefactoring — first with given offset, then with
+            // method name range from Java Model if the offset hits a problematic AST node
+            org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring inlineMethod = null;
+            try {
+                inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
                     cu, astRoot, offset, 0);
+            } catch (Exception createEx) {
+                McpLogger.warn("RefactoringTools", "InlineMethod.create() failed at offset " + offset +
+                        ", trying via Java Model: " + createEx);
+            }
+
+            // Fallback: resolve IMethod at offset via Java Model and use its name range
+            if (inlineMethod == null) {
+                IJavaElement[] elements = cu.codeSelect(offset, 0);
+                for (IJavaElement el : elements) {
+                    if (el instanceof org.eclipse.jdt.core.IMethod method) {
+                        org.eclipse.jdt.core.ISourceRange nameRange = method.getNameRange();
+                        if (nameRange != null) {
+                            McpLogger.info("RefactoringTools", "Retrying InlineMethod with method name range: offset="
+                                    + nameRange.getOffset() + " length=" + nameRange.getLength());
+                            try {
+                                inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
+                                    cu, astRoot, nameRange.getOffset(), nameRange.getLength());
+                            } catch (Exception retryEx) {
+                                McpLogger.warn("RefactoringTools", "InlineMethod.create() retry also failed: " + retryEx);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
 
             if (inlineMethod != null) {
                 RefactoringStatus methodStatus;
                 try {
                     methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
                 } catch (Exception initEx) {
-                    // JDT InlineMethodRefactoring can throw NPE for unsupported method types
-                    // (e.g. static factory methods where VariableDeclaration cannot be resolved)
                     String initMsg = initEx.getMessage() != null ? initEx.getMessage() : initEx.toString();
                     McpLogger.warn("RefactoringTools", "InlineMethod checkInitialConditions failed: " + initMsg);
                     result.put("status", "ERROR");
                     result.put("message", "Inline method not supported at this position. " +
-                            "The method may use patterns not supported for inline refactoring (e.g. static factory methods). " +
+                            "The method may use patterns not supported for inline refactoring. " +
                             "Detail: " + initMsg);
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
