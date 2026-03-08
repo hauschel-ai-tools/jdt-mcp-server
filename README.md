@@ -216,6 +216,65 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 jdtls-mcp --http
 ```
 
+## Workspace-Management
+
+Der JDT MCP Server verwaltet einen **Eclipse Workspace** pro Arbeitsverzeichnis. Der Workspace enthält die JDT-Metadaten (Index, Classpath, Build-State) — die eigentlichen Projektdateien bleiben an ihrem Platz.
+
+### Wie Workspaces funktionieren
+
+```
+~/mein-java-projekt/          ← Arbeitsverzeichnis (user.dir)
+  ├── pom.xml                 ← Maven-Projekt wird automatisch importiert
+  ├── modul-a/                ← Multi-Module: jedes Modul wird ein eigenes JDT-Projekt
+  └── modul-b/
+
+~/.jdt-mcp/
+  ├── workspaces/<md5-hash>/  ← Eclipse Workspace (pro Arbeitsverzeichnis)
+  │   └── .metadata/          ← JDT-Index, Build-State, Projekt-Referenzen
+  └── jdt-mcp-mein-java-projekt.log  ← Log (pro Arbeitsverzeichnis)
+```
+
+- **Automatischer Import**: Beim Start importiert der Server alle Projekte aus dem Arbeitsverzeichnis (Maven, Gradle, Eclipse `.project`)
+- **Persistenter Workspace**: Der Workspace bleibt zwischen Neustarts erhalten — kein erneuter Import nötig
+- **Ein Workspace pro Verzeichnis**: Jedes Arbeitsverzeichnis bekommt einen eigenen, isolierten Workspace (MD5-Hash des Pfads)
+
+### Workspace zurücksetzen
+
+Falls der Workspace korrupt ist oder Projekte nicht korrekt erkannt werden:
+
+```bash
+# Workspace-Verzeichnis für aktuelles Arbeitsverzeichnis finden
+HASH=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+rm -rf ~/.jdt-mcp/workspaces/$HASH
+
+# Server neu starten (Claude Code neu starten oder Session beenden)
+```
+
+Beim nächsten Start wird der Workspace automatisch neu erstellt und alle Projekte frisch importiert.
+
+### Zusätzliche Projekte importieren
+
+Projekte die nicht im Arbeitsverzeichnis liegen, können nachträglich importiert werden:
+
+```
+jdt_import_project(path="/pfad/zum/anderen/projekt")
+```
+
+### Workspace-Umgebungsvariablen
+
+| Variable | Beschreibung | Standard |
+|----------|-------------|----------|
+| `JDTMCP_WORKSPACE` | Eigenes Workspace-Verzeichnis setzen | `~/.jdt-mcp/workspaces/<hash>` |
+
+### Logs
+
+Jede Server-Instanz loggt in eine eigene Datei basierend auf dem Arbeitsverzeichnis:
+
+```bash
+# Logs für ein bestimmtes Projekt anschauen
+tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
+```
+
 ## Typischer Workflow
 
 1. **Start**: `jdt_list_projects` aufrufen um verfügbare Projekte zu sehen
@@ -237,7 +296,7 @@ jdtls-mcp --http
 
 ### Server startet nicht
 
-1. Log prüfen: `~/.jdt-mcp/jdt-mcp.log`
+1. Log prüfen: `~/.jdt-mcp/jdt-mcp-<projektname>.log`
 2. Java-Version prüfen: `java -version` (21+ erforderlich)
 3. Binary testen: `jdtls-mcp` direkt ausführen, stderr-Ausgabe beobachten
 

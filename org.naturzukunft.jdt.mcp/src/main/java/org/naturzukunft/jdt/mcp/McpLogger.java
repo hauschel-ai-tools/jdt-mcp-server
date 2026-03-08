@@ -6,6 +6,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -17,13 +18,13 @@ import org.eclipse.core.runtime.Status;
 /**
  * Simple file-based logger for JDT MCP Server debugging.
  * Logs to:
- * - ~/.jdt-mcp/jdt-mcp.log (always)
+ * - ~/.jdt-mcp/jdt-mcp-&lt;dirname&gt;.log (per working directory)
  * - Eclipse Error Log (for WARN and ERROR levels)
  */
 public class McpLogger {
 
     private static final String LOG_DIR = System.getProperty("user.home") + File.separator + ".jdt-mcp";
-    private static final String LOG_FILE = LOG_DIR + File.separator + "jdt-mcp.log";
+    private static final String LOG_FILE = LOG_DIR + File.separator + buildLogFileName();
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     private static final long MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -157,6 +158,21 @@ public class McpLogger {
         } catch (Exception e) {
             // Ignore - Eclipse may not be fully initialized
         }
+    }
+
+    /**
+     * Builds a log file name based on the working directory.
+     * E.g. for user.dir=/home/user/tmp/mcpJdtTest → "jdt-mcp-mcpJdtTest.log"
+     */
+    private static String buildLogFileName() {
+        String workDir = System.getProperty("user.dir", "");
+        String dirName = Path.of(workDir).getFileName().toString();
+        // Sanitize: keep only alphanumeric, dash, underscore, dot
+        String sanitized = dirName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (sanitized.isEmpty()) {
+            sanitized = "default";
+        }
+        return "jdt-mcp-" + sanitized + ".log";
     }
 
     /**
