@@ -402,13 +402,8 @@ public class RefactoringTools {
     private static CallToolResult moveType(String typeName, String targetPackage,
             boolean updateReferences, boolean previewOnly) {
         try {
-            // Find the type
-            IType type = null;
-            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                    .getJavaProjects()) {
-                type = project.findType(typeName);
-                if (type != null) break;
-            }
+            // Find the type in its source project
+            IType type = findTypeInSourceProject(typeName);
 
             if (type == null) {
                 return new CallToolResult("Type not found: " + typeName, true);
@@ -879,12 +874,7 @@ public class RefactoringTools {
     private static CallToolResult extractInterface(String className, String interfaceName,
             List<String> methodNames, boolean previewOnly) {
         try {
-            IType type = null;
-            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                    .getJavaProjects()) {
-                type = project.findType(className);
-                if (type != null) break;
-            }
+            IType type = findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1113,12 +1103,7 @@ public class RefactoringTools {
             String newName, String newReturnType, List<Map<String, String>> addParameters,
             List<String> removeParameters, boolean previewOnly) {
         try {
-            IType type = null;
-            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                    .getJavaProjects()) {
-                type = project.findType(className);
-                if (type != null) break;
-            }
+            IType type = findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1439,12 +1424,7 @@ public class RefactoringTools {
     private static CallToolResult encapsulateField(String className, String fieldName,
             boolean generateGetter, boolean generateSetter, boolean previewOnly) {
         try {
-            IType type = null;
-            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                    .getJavaProjects()) {
-                type = project.findType(className);
-                if (type != null) break;
-            }
+            IType type = findTypeInSourceProject(className);
 
             if (type == null) {
                 return new CallToolResult("Class not found: " + className, true);
@@ -1998,54 +1978,71 @@ public class RefactoringTools {
     }
 
     /**
+     * Finds IType in the project that OWNS the source file (non-binary).
+     * This is critical for refactoring: the element must come from the
+     * declaring project so that ICompilationUnit is editable and bindings
+     * are resolved via source, not class files.
+     */
+    private static IType findTypeInSourceProject(String fullyQualifiedName) throws Exception {
+        IType fallback = null;
+        for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                .getJavaProjects()) {
+            if (!project.getProject().isOpen()) continue;
+            IType candidate = project.findType(fullyQualifiedName);
+            if (candidate == null) continue;
+            // Ideal: source type whose resource lives in this project
+            if (!candidate.isBinary() && candidate.getResource() != null) {
+                return candidate;
+            }
+            if (fallback == null) {
+                fallback = candidate;
+            }
+        }
+        return fallback;
+    }
+
+    /**
      * Helper: Find a Java element by name and type.
      */
     private static IJavaElement findElement(String elementName, String elementType) {
         try {
-            for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
-                    .getJavaProjects()) {
-
-                switch (elementType.toUpperCase()) {
-                    case "CLASS", "INTERFACE", "ENUM", "TYPE" -> {
-                        IType type = project.findType(elementName);
-                        if (type != null) {
-                            return type;
-                        }
+            switch (elementType.toUpperCase()) {
+                case "CLASS", "INTERFACE", "ENUM", "TYPE" -> {
+                    return findTypeInSourceProject(elementName);
+                }
+                case "METHOD" -> {
+                    // Format: com.example.Class#methodName or com.example.Class.methodName
+                    int separator = elementName.lastIndexOf('#');
+                    if (separator == -1) {
+                        separator = elementName.lastIndexOf('.');
                     }
-                    case "METHOD" -> {
-                        // Format: com.example.Class#methodName or com.example.Class.methodName
-                        int separator = elementName.lastIndexOf('#');
-                        if (separator == -1) {
-                            separator = elementName.lastIndexOf('.');
-                        }
-                        if (separator > 0) {
-                            String className = elementName.substring(0, separator);
-                            String methodNamePart = elementName.substring(separator + 1);
-                            IType type = project.findType(className);
-                            if (type != null) {
-                                for (IMethod method : type.getMethods()) {
-                                    if (method.getElementName().equals(methodNamePart)) {
-                                        return method;
-                                    }
+                    if (separator > 0) {
+                        String className = elementName.substring(0, separator);
+                        String methodNamePart = elementName.substring(separator + 1);
+                        IType type = findTypeInSourceProject(className);
+                        if (type != null) {
+                            for (IMethod method : type.getMethods()) {
+                                if (method.getElementName().equals(methodNamePart)) {
+                                    return method;
                                 }
                             }
                         }
                     }
-                    case "FIELD" -> {
-                        // Format: com.example.Class#fieldName or com.example.Class.fieldName
-                        int separator = elementName.lastIndexOf('#');
-                        if (separator == -1) {
-                            separator = elementName.lastIndexOf('.');
-                        }
-                        if (separator > 0) {
-                            String className = elementName.substring(0, separator);
-                            String fieldNamePart = elementName.substring(separator + 1);
-                            IType type = project.findType(className);
-                            if (type != null) {
-                                IField field = type.getField(fieldNamePart);
-                                if (field != null && field.exists()) {
-                                    return field;
-                                }
+                }
+                case "FIELD" -> {
+                    // Format: com.example.Class#fieldName or com.example.Class.fieldName
+                    int separator = elementName.lastIndexOf('#');
+                    if (separator == -1) {
+                        separator = elementName.lastIndexOf('.');
+                    }
+                    if (separator > 0) {
+                        String className = elementName.substring(0, separator);
+                        String fieldNamePart = elementName.substring(separator + 1);
+                        IType type = findTypeInSourceProject(className);
+                        if (type != null) {
+                            IField field = type.getField(fieldNamePart);
+                            if (field != null && field.exists()) {
+                                return field;
                             }
                         }
                     }
