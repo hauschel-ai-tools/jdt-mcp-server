@@ -482,14 +482,19 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            McpLogger.error("RefactoringTools", "moveType failed: " + msg, e);
             Map<String, Object> error = new HashMap<>();
             error.put("status", "ERROR");
-            error.put("message", "Error during move: " + e.getMessage());
+            error.put("message", "Error during move: " + msg);
             error.put("exceptionType", e.getClass().getSimpleName());
+            if (e.getCause() != null) {
+                error.put("cause", e.getCause().toString());
+            }
             try {
                 return new CallToolResult(MAPPER.writeValueAsString(error), true);
             } catch (Exception ex) {
-                return new CallToolResult("Error during move: " + e.getMessage(), true);
+                return new CallToolResult("Error during move: " + msg, true);
             }
         }
     }
@@ -762,12 +767,55 @@ public class RefactoringTools {
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
+            // InlineTemp didn't work — try InlineMethod (needs AST CompilationUnit)
+            org.eclipse.jdt.core.dom.ASTParser parser = org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
+            parser.setSource(cu);
+            parser.setResolveBindings(true);
+            org.eclipse.jdt.core.dom.CompilationUnit astRoot =
+                (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(new NullProgressMonitor());
+
+            org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring inlineMethod =
+                org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
+                    cu, astRoot, offset, 0);
+
+            if (inlineMethod != null) {
+                RefactoringStatus methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                if (!methodStatus.hasError()) {
+                    RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
+
+                    List<String> inlineErrors = getRealErrors(checkStatus);
+                    if (!inlineErrors.isEmpty()) {
+                        result.put("status", "ERROR");
+                        result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
+                        return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                    }
+
+                    if (previewOnly) {
+                        Change change = inlineMethod.createChange(new NullProgressMonitor());
+                        result.put("status", "PREVIEW");
+                        result.put("inlineType", "METHOD");
+                        result.put("changes", describeChange(change));
+                        return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                    }
+
+                    Change change = inlineMethod.createChange(new NullProgressMonitor());
+                    change.perform(new NullProgressMonitor());
+
+                    result.put("status", "SUCCESS");
+                    result.put("inlineType", "METHOD");
+                    result.put("message", "Method inlined successfully");
+                    return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                }
+            }
+
             result.put("status", "ERROR");
-            result.put("message", "No inlineable local variable found at position " + offset + ". For methods, use extract/rename instead.");
+            result.put("message", "No inlineable element found at position " + offset + ". Position must be on a local variable assignment or a method name.");
             return new CallToolResult(MAPPER.writeValueAsString(result), true);
 
         } catch (Exception e) {
-            return new CallToolResult("Error during inline: " + e.getMessage(), true);
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            McpLogger.error("RefactoringTools", "inlineElement failed: " + msg, e);
+            return new CallToolResult("Error during inline: " + msg, true);
         }
     }
 
@@ -1140,7 +1188,20 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error changing method signature: " + e.getMessage(), true);
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            McpLogger.error("RefactoringTools", "changeMethodSignature failed: " + msg, e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", "Error changing method signature: " + msg);
+            error.put("exceptionType", e.getClass().getSimpleName());
+            if (e.getCause() != null) {
+                error.put("cause", e.getCause().toString());
+            }
+            try {
+                return new CallToolResult(MAPPER.writeValueAsString(error), true);
+            } catch (Exception ex) {
+                return new CallToolResult("Error changing method signature: " + msg, true);
+            }
         }
     }
 
@@ -1860,9 +1921,12 @@ public class RefactoringTools {
         List<String> realErrors = new java.util.ArrayList<>();
         for (var entry : status.getEntries()) {
             if (entry.getSeverity() >= RefactoringStatus.ERROR) {
-                if (entry.getMessage() == null || !entry.getMessage().contains("participant")) {
-                    realErrors.add(entry.getMessage());
-                }
+                String msg = entry.getMessage();
+                // Skip harmless headless-mode errors
+                if (msg != null && msg.contains("participant")) continue;
+                // "potential matches" are informational, not blocking errors
+                if (msg != null && msg.toLowerCase().contains("potential match")) continue;
+                realErrors.add(msg);
             }
         }
         return realErrors;
