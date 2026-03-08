@@ -144,7 +144,7 @@ class ExtractInterfaceRefactoring {
 
     private static CodeGenerationSettings getCodeGenerationSettings(IType type) {
         try {
-            return org.eclipse.jdt.internal.corext.codemanipulation.JavaPreferencesSettings
+            return org.eclipse.jdt.internal.ui.preferences.JavaPreferencesSettings
                     .getCodeGenerationSettings(type.getJavaProject());
         } catch (Exception e) {
             // Headless fallback: ProjectScope.getNode() may throw IAE
