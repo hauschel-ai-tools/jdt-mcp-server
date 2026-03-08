@@ -3,9 +3,12 @@ package org.naturzukunft.jdt.mcp;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IWorkspace;
+import org.eclipse.core.resources.IncrementalProjectBuilder;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.equinox.app.IApplication;
 import org.eclipse.equinox.app.IApplicationContext;
@@ -14,15 +17,28 @@ import org.naturzukunft.jdt.mcp.server.McpStdioServer;
 
 /**
  * Headless Eclipse application for running the JDT MCP server standalone.
- * Starts the MCP server immediately, then imports projects in the background.
+ * Starts the MCP server immediately, then imports projects and builds in the background.
+ * Tools are blocked via {@link #awaitReady(long, TimeUnit)} until import and build are complete.
  */
 public class HeadlessApplication implements IApplication {
 
-    private static final AtomicBoolean importing = new AtomicBoolean(false);
+    private static final CountDownLatch readyLatch = new CountDownLatch(1);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
+    /**
+     * Returns true if project import and build are still in progress.
+     */
     public static boolean isImporting() {
-        return importing.get();
+        return readyLatch.getCount() > 0;
+    }
+
+    /**
+     * Blocks until project import and build are complete, or the timeout expires.
+     *
+     * @return true if ready, false if timeout elapsed
+     */
+    public static boolean awaitReady(long timeout, TimeUnit unit) throws InterruptedException {
+        return readyLatch.await(timeout, unit);
     }
 
     @Override
@@ -43,7 +59,6 @@ public class HeadlessApplication implements IApplication {
         String workDir = System.getProperty("user.dir");
         McpLogger.info("HeadlessApplication", "Working directory: " + workDir);
 
-        importing.set(true);
         Thread importThread = new Thread(() -> {
             try {
                 List<IProject> projects = ProjectImporter.importFromDirectory(
@@ -54,11 +69,22 @@ public class HeadlessApplication implements IApplication {
                     McpLogger.info("HeadlessApplication", "  - " + project.getName() +
                             " (" + project.getLocation() + ")");
                 }
+
+                // Enable auto-building and trigger explicit build (#27)
+                IWorkspace workspace = ResourcesPlugin.getWorkspace();
+                var desc = workspace.getDescription();
+                desc.setAutoBuilding(true);
+                workspace.setDescription(desc);
+                McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering workspace build...");
+
+                workspace.build(IncrementalProjectBuilder.INCREMENTAL_BUILD, new NullProgressMonitor());
+                McpLogger.info("HeadlessApplication", "Workspace build completed");
+
             } catch (Exception e) {
-                McpLogger.error("HeadlessApplication", "Project import failed", e);
+                McpLogger.error("HeadlessApplication", "Project import/build failed", e);
             } finally {
-                importing.set(false);
-                McpLogger.info("HeadlessApplication", "Project import finished");
+                readyLatch.countDown();
+                McpLogger.info("HeadlessApplication", "Project import and build finished — ready for requests");
             }
         }, "jdtmcp-project-importer");
         importThread.setDaemon(true);

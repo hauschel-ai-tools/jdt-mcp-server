@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
+import org.naturzukunft.jdt.mcp.HeadlessApplication;
 import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolHandler;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
@@ -28,6 +30,7 @@ public class McpProtocolHandler {
     private static final String MCP_VERSION = "2024-11-05";
     private static final String SERVER_NAME = "Eclipse JDT MCP Server";
     private static final String SERVER_VERSION = org.naturzukunft.jdt.mcp.VersionInfo.getVersion();
+    private static final long READY_TIMEOUT_SECONDS = 300; // 5 minutes max wait
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, ToolRegistration> tools = new HashMap<>();
@@ -200,6 +203,23 @@ public class McpProtocolHandler {
             throw new McpException(-32602, "Unknown tool: " + toolName);
         }
 
+        // Wait for project import and build to complete (#28)
+        // Allow metadata tools to run immediately during import
+        if (!isImportSafeTool(toolName) && HeadlessApplication.isImporting()) {
+            McpLogger.info("Protocol", "Tool " + toolName + " waiting for project import/build to complete...");
+            try {
+                boolean ready = HeadlessApplication.awaitReady(READY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!ready) {
+                    throw new McpException(-32603,
+                            "Timeout waiting for project import/build to complete (" + READY_TIMEOUT_SECONDS + "s)");
+                }
+                McpLogger.info("Protocol", "Project import/build complete, proceeding with " + toolName);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new McpException(-32603, "Interrupted while waiting for project import/build");
+            }
+        }
+
         // Convert arguments to Map
         Map<String, Object> args = new HashMap<>();
         if (arguments != null && arguments.isObject()) {
@@ -339,6 +359,16 @@ public class McpProtocolHandler {
         } catch (Exception e) {
             return "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"Error creating error response\"}}";
         }
+    }
+
+    /**
+     * Tools that are safe to call during project import/build.
+     * These return metadata or status and don't depend on a fully indexed workspace.
+     */
+    private static boolean isImportSafeTool(String toolName) {
+        return "jdt_get_version".equals(toolName)
+                || "jdt_list_projects".equals(toolName)
+                || "jdt_import_project".equals(toolName);
     }
 
     /**
