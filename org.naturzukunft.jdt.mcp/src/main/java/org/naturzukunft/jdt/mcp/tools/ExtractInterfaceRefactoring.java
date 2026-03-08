@@ -5,10 +5,15 @@ import java.util.List;
 import java.util.Map;
 
 import org.eclipse.core.runtime.NullProgressMonitor;
-import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.Flags;
+import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.IMethod;
-import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.internal.corext.codemanipulation.CodeGenerationSettings;
+import org.eclipse.jdt.internal.corext.refactoring.structure.ExtractInterfaceProcessor;
+import org.eclipse.ltk.core.refactoring.Change;
+import org.eclipse.ltk.core.refactoring.RefactoringStatus;
+import org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,8 +24,8 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 /**
  * MCP tool for extracting interfaces from classes.
- *
- * Extracted from RefactoringTools as part of #30 (God Class refactoring).
+ * Uses JDT's {@link ExtractInterfaceProcessor} for robust, cross-project-aware refactoring
+ * that correctly handles generics, annotations, and complex class declarations.
  */
 class ExtractInterfaceRefactoring {
 
@@ -73,17 +78,14 @@ class ExtractInterfaceRefactoring {
                 return new CallToolResult("Class not found: " + className, true);
             }
 
-            // Collect methods to extract
+            // Collect public non-static, non-constructor methods to extract
             List<IMethod> methodsToExtract = new java.util.ArrayList<>();
             boolean includeAll = methodNames.contains("*");
 
             for (IMethod method : type.getMethods()) {
                 if (includeAll || methodNames.contains(method.getElementName())) {
-                    // Only include public non-static methods
                     int flags = method.getFlags();
-                    if (org.eclipse.jdt.core.Flags.isPublic(flags) &&
-                        !org.eclipse.jdt.core.Flags.isStatic(flags) &&
-                        !method.isConstructor()) {
+                    if (Flags.isPublic(flags) && !Flags.isStatic(flags) && !method.isConstructor()) {
                         methodsToExtract.add(method);
                     }
                 }
@@ -93,149 +95,45 @@ class ExtractInterfaceRefactoring {
                 return new CallToolResult("No public methods found to extract", true);
             }
 
-            // Build interface source manually since the internal API has changed
-            StringBuilder interfaceSource = new StringBuilder();
-            String packageName = type.getPackageFragment().getElementName();
+            // Use JDT's ExtractInterfaceProcessor
+            CodeGenerationSettings settings = getCodeGenerationSettings(type);
+            ExtractInterfaceProcessor processor = new ExtractInterfaceProcessor(type, settings);
+            processor.setTypeName(interfaceName);
+            processor.setExtractedMembers(methodsToExtract.toArray(new IMember[0]));
+            processor.setReplace(true);
+            processor.setAnnotations(false);
 
-            if (!packageName.isEmpty()) {
-                interfaceSource.append("package ").append(packageName).append(";\n\n");
-            }
+            ProcessorBasedRefactoring refactoring = new ProcessorBasedRefactoring(processor);
+            RefactoringStatus status = refactoring.checkAllConditions(new NullProgressMonitor());
 
-            // Collect imports needed
-            java.util.Set<String> imports = new java.util.TreeSet<>();
-            for (IMethod method : methodsToExtract) {
-                String returnType = method.getReturnType();
-                // Add imports for parameter types and return types if needed
-                for (String paramType : method.getParameterTypes()) {
-                    addImportIfNeeded(paramType, imports);
-                }
-                addImportIfNeeded(returnType, imports);
-            }
-
-            for (String imp : imports) {
-                interfaceSource.append("import ").append(imp).append(";\n");
-            }
-            if (!imports.isEmpty()) {
-                interfaceSource.append("\n");
-            }
-
-            interfaceSource.append("public interface ").append(interfaceName).append(" {\n\n");
-
-            for (IMethod method : methodsToExtract) {
-                interfaceSource.append("    ");
-                interfaceSource.append(org.eclipse.jdt.core.Signature.toString(method.getReturnType()));
-                interfaceSource.append(" ").append(method.getElementName()).append("(");
-
-                String[] paramNames = method.getParameterNames();
-                String[] paramTypes = method.getParameterTypes();
-                for (int i = 0; i < paramNames.length; i++) {
-                    if (i > 0) interfaceSource.append(", ");
-                    interfaceSource.append(org.eclipse.jdt.core.Signature.toString(paramTypes[i]));
-                    interfaceSource.append(" ").append(paramNames[i]);
-                }
-
-                interfaceSource.append(")");
-
-                String[] exceptions = method.getExceptionTypes();
-                if (exceptions.length > 0) {
-                    interfaceSource.append(" throws ");
-                    for (int i = 0; i < exceptions.length; i++) {
-                        if (i > 0) interfaceSource.append(", ");
-                        interfaceSource.append(org.eclipse.jdt.core.Signature.toString(exceptions[i]));
-                    }
-                }
-
-                interfaceSource.append(";\n\n");
-            }
-
-            interfaceSource.append("}\n");
-
-            // Prepare result
             Map<String, Object> result = new HashMap<>();
             result.put("className", className);
             result.put("interfaceName", interfaceName);
             result.put("methodCount", methodsToExtract.size());
             result.put("methods", methodsToExtract.stream().map(IMethod::getElementName).toList());
+            String packageName = type.getPackageFragment().getElementName();
             result.put("newInterface", packageName.isEmpty() ? interfaceName : packageName + "." + interfaceName);
 
-            // Prepare class modification
-            ICompilationUnit classCu = type.getCompilationUnit();
-            String classSource = classCu.getSource();
-            String newClassSource = null;
-
-            // Find class declaration and prepare "implements InterfaceName"
-            String classDecl = "class " + type.getElementName();
-            int classPos = classSource.indexOf(classDecl);
-            if (classPos >= 0) {
-                int afterClass = classPos + classDecl.length();
-                String beforeBrace = classSource.substring(afterClass, classSource.indexOf('{', afterClass));
-
-                String newImplements;
-                if (beforeBrace.contains("implements")) {
-                    // Already has implements, add to list
-                    newImplements = " " + beforeBrace.trim().replace("implements", "implements " + interfaceName + ",");
-                } else if (beforeBrace.contains("extends")) {
-                    // Has extends but no implements
-                    newImplements = " " + beforeBrace.trim() + " implements " + interfaceName;
-                } else {
-                    // No extends or implements
-                    newImplements = " implements " + interfaceName;
-                }
-
-                newClassSource = classSource.substring(0, afterClass) + newImplements + " " +
-                    classSource.substring(classSource.indexOf('{', afterClass));
+            List<String> realErrors = RefactoringSupport.getRealErrors(status);
+            if (!realErrors.isEmpty()) {
+                result.put("status", "ERROR");
+                result.put("message", "Extract interface has errors: " + String.join("; ", realErrors));
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            // Preview mode: return what would be changed without applying
             if (previewOnly) {
+                Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of interface extraction (no changes applied)");
-
-                List<Map<String, Object>> changes = new java.util.ArrayList<>();
-
-                // New interface file
-                Map<String, Object> newFileChange = new HashMap<>();
-                newFileChange.put("type", "CREATE_FILE");
-                newFileChange.put("file", type.getPackageFragment().getResource().getLocation().toString()
-                    + "/" + interfaceName + ".java");
-                newFileChange.put("content", interfaceSource.toString());
-                changes.add(newFileChange);
-
-                // Class modification
-                if (newClassSource != null) {
-                    Map<String, Object> classChange = new HashMap<>();
-                    classChange.put("type", "MODIFY_FILE");
-                    classChange.put("file", classCu.getResource().getLocation().toString());
-                    classChange.put("description", "Add 'implements " + interfaceName + "' to class declaration");
-                    changes.add(classChange);
-                }
-
-                result.put("changes", changes);
+                result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
-            // Apply changes: Create the interface file
-            IPackageFragment pkg = type.getPackageFragment();
-            ICompilationUnit newInterface = pkg.createCompilationUnit(
-                interfaceName + ".java",
-                interfaceSource.toString(),
-                true,
-                new NullProgressMonitor());
-
-            // Apply changes: Update the class to implement the interface
-            if (newClassSource != null) {
-                ICompilationUnit workingCopy = classCu.getWorkingCopy(new NullProgressMonitor());
-                try {
-                    workingCopy.getBuffer().setContents(newClassSource);
-                    workingCopy.commitWorkingCopy(true, new NullProgressMonitor());
-                } finally {
-                    workingCopy.discardWorkingCopy();
-                }
-            }
+            Change change = refactoring.createChange(new NullProgressMonitor());
+            change.perform(new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Interface extracted successfully");
-            result.put("interfaceFile", newInterface.getResource().getLocation().toString());
 
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
@@ -244,15 +142,16 @@ class ExtractInterfaceRefactoring {
         }
     }
 
-    /**
-     * Helper: Add import to set if it's a qualified type.
-     */
-    private static void addImportIfNeeded(String typeSignature, java.util.Set<String> imports) {
-        if (typeSignature == null) return;
-        String typeName = org.eclipse.jdt.core.Signature.toString(typeSignature);
-        // Skip primitives and java.lang types
-        if (typeName.contains(".") && !typeName.startsWith("java.lang.")) {
-            imports.add(typeName);
+    private static CodeGenerationSettings getCodeGenerationSettings(IType type) {
+        try {
+            return org.eclipse.jdt.internal.corext.codemanipulation.JavaPreferencesSettings
+                    .getCodeGenerationSettings(type.getJavaProject());
+        } catch (Exception e) {
+            // Headless fallback: ProjectScope.getNode() may throw IAE
+            CodeGenerationSettings settings = new CodeGenerationSettings();
+            settings.createComments = false;
+            settings.tabWidth = 4;
+            return settings;
         }
     }
 }

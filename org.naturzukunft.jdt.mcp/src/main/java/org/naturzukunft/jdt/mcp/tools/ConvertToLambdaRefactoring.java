@@ -12,8 +12,22 @@ import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
+import org.eclipse.jdt.core.dom.AnonymousClassDeclaration;
+import org.eclipse.jdt.core.dom.Block;
+import org.eclipse.jdt.core.dom.ClassInstanceCreation;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.ExpressionStatement;
+import org.eclipse.jdt.core.dom.LambdaExpression;
+import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.NodeFinder;
+import org.eclipse.jdt.core.dom.ReturnStatement;
+import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
+import org.eclipse.jdt.core.dom.Statement;
+import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
+import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
+import org.eclipse.text.edits.TextEdit;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,8 +38,8 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 /**
  * MCP tool for converting anonymous inner classes to lambda expressions.
- *
- * Extracted from RefactoringTools as part of #30 (God Class refactoring).
+ * Uses {@link ASTRewrite} with proper {@link LambdaExpression} AST nodes
+ * instead of fragile StringBuilder-based string manipulation.
  */
 class ConvertToLambdaRefactoring {
 
@@ -86,12 +100,11 @@ class ConvertToLambdaRefactoring {
             CompilationUnit ast = (CompilationUnit) parser.createAST(new NullProgressMonitor());
 
             // Find anonymous class at offset
-            org.eclipse.jdt.core.dom.ASTNode node = org.eclipse.jdt.core.dom.NodeFinder.perform(ast, offset, 0);
+            ASTNode node = NodeFinder.perform(ast, offset, 0);
 
-            // Navigate up to find AnonymousClassDeclaration
-            org.eclipse.jdt.core.dom.AnonymousClassDeclaration anonClass = null;
+            AnonymousClassDeclaration anonClass = null;
             while (node != null) {
-                if (node instanceof org.eclipse.jdt.core.dom.AnonymousClassDeclaration acd) {
+                if (node instanceof AnonymousClassDeclaration acd) {
                     anonClass = acd;
                     break;
                 }
@@ -102,88 +115,83 @@ class ConvertToLambdaRefactoring {
                 return new CallToolResult("No anonymous class found at position " + offset, true);
             }
 
-            // Check if it's a functional interface (single abstract method)
+            // Check: single abstract method (functional interface)
             List<org.eclipse.jdt.core.dom.BodyDeclaration> bodyDecls = anonClass.bodyDeclarations();
+            MethodDeclaration singleMethod = null;
             int methodCount = 0;
-            org.eclipse.jdt.core.dom.MethodDeclaration singleMethod = null;
 
             for (org.eclipse.jdt.core.dom.BodyDeclaration decl : bodyDecls) {
-                if (decl instanceof org.eclipse.jdt.core.dom.MethodDeclaration md) {
+                if (decl instanceof MethodDeclaration md) {
                     methodCount++;
                     singleMethod = md;
                 }
             }
 
             if (methodCount != 1) {
-                return new CallToolResult("Cannot convert - anonymous class must have exactly one method (found " + methodCount + ")", true);
+                return new CallToolResult(
+                        "Cannot convert - anonymous class must have exactly one method (found " + methodCount + ")",
+                        true);
+            }
+
+            // Parent must be ClassInstanceCreation
+            ASTNode parent = anonClass.getParent();
+            if (!(parent instanceof ClassInstanceCreation)) {
+                return new CallToolResult("Unexpected AST structure", true);
+            }
+
+            // Build LambdaExpression via AST API
+            AST astFactory = ast.getAST();
+            LambdaExpression lambda = astFactory.newLambdaExpression();
+
+            // Parameters: use inferred types (just names)
+            List<SingleVariableDeclaration> params = singleMethod.parameters();
+            lambda.setParentheses(params.size() != 1);
+            for (SingleVariableDeclaration param : params) {
+                VariableDeclarationFragment fragment = astFactory.newVariableDeclarationFragment();
+                fragment.setName(astFactory.newSimpleName(param.getName().getIdentifier()));
+                lambda.parameters().add(fragment);
+            }
+
+            // Body: single expression for simple cases, block for complex ones
+            Block body = singleMethod.getBody();
+            if (body != null) {
+                List<Statement> statements = body.statements();
+                if (statements.size() == 1) {
+                    Statement stmt = statements.get(0);
+                    if (stmt instanceof ReturnStatement ret && ret.getExpression() != null) {
+                        lambda.setBody((org.eclipse.jdt.core.dom.Expression) ASTNode.copySubtree(astFactory,
+                                ret.getExpression()));
+                    } else if (stmt instanceof ExpressionStatement expr) {
+                        lambda.setBody((org.eclipse.jdt.core.dom.Expression) ASTNode.copySubtree(astFactory,
+                                expr.getExpression()));
+                    } else {
+                        lambda.setBody((Block) ASTNode.copySubtree(astFactory, body));
+                    }
+                } else {
+                    lambda.setBody((Block) ASTNode.copySubtree(astFactory, body));
+                }
             }
 
             Map<String, Object> result = new HashMap<>();
             result.put("filePath", filePath);
             result.put("offset", offset);
             result.put("methodName", singleMethod.getName().getIdentifier());
-
-            // Get the ClassInstanceCreation parent
-            org.eclipse.jdt.core.dom.ASTNode parent = anonClass.getParent();
-            if (!(parent instanceof org.eclipse.jdt.core.dom.ClassInstanceCreation)) {
-                return new CallToolResult("Unexpected AST structure", true);
-            }
-
-            // Build lambda expression manually
-            StringBuilder lambda = new StringBuilder();
-            List<org.eclipse.jdt.core.dom.SingleVariableDeclaration> params = singleMethod.parameters();
-
-            if (params.isEmpty()) {
-                lambda.append("()");
-            } else if (params.size() == 1) {
-                lambda.append(params.get(0).getName().getIdentifier());
-            } else {
-                lambda.append("(");
-                for (int i = 0; i < params.size(); i++) {
-                    if (i > 0) lambda.append(", ");
-                    lambda.append(params.get(i).getName().getIdentifier());
-                }
-                lambda.append(")");
-            }
-
-            lambda.append(" -> ");
-
-            // Get body
-            org.eclipse.jdt.core.dom.Block body = singleMethod.getBody();
-            if (body != null) {
-                List<org.eclipse.jdt.core.dom.Statement> statements = body.statements();
-                if (statements.size() == 1) {
-                    org.eclipse.jdt.core.dom.Statement stmt = statements.get(0);
-                    if (stmt instanceof org.eclipse.jdt.core.dom.ReturnStatement ret && ret.getExpression() != null) {
-                        lambda.append(ret.getExpression().toString());
-                    } else if (stmt instanceof org.eclipse.jdt.core.dom.ExpressionStatement expr) {
-                        lambda.append(expr.getExpression().toString());
-                    } else {
-                        lambda.append(body.toString());
-                    }
-                } else {
-                    lambda.append(body.toString());
-                }
-            }
-
             result.put("lambdaExpression", lambda.toString());
 
             if (previewOnly) {
                 result.put("status", "PREVIEW");
-                result.put("message", "Suggested lambda expression (manual replacement needed)");
+                result.put("message", "Suggested lambda expression (no changes applied)");
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
-            // For actual conversion, replace the source
-            String source = cu.getSource();
-            int start = parent.getStartPosition();
-            int end = start + parent.getLength();
+            // Apply via ASTRewrite
+            ASTRewrite rewrite = ASTRewrite.create(astFactory);
+            rewrite.replace(parent, lambda, null);
 
-            String newSource = source.substring(0, start) + lambda.toString() + source.substring(end);
-
+            TextEdit edit = rewrite.rewriteAST();
             ICompilationUnit workingCopy = cu.getWorkingCopy(new NullProgressMonitor());
             try {
-                workingCopy.getBuffer().setContents(newSource);
+                workingCopy.applyTextEdit(edit, new NullProgressMonitor());
                 workingCopy.commitWorkingCopy(true, new NullProgressMonitor());
             } finally {
                 workingCopy.discardWorkingCopy();

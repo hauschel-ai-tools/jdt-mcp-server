@@ -74,4 +74,5 @@ exec "$JAVA" \
     -configuration "$BASEDIR/configuration" \
     -data "$WORKSPACE" \
     -nosplash \
+    -clean \
     "$@"

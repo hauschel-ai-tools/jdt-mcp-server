@@ -346,7 +346,7 @@ public class ProjectImporter {
             ProcessBuilder pb = new ProcessBuilder(
                     "mvn", "-q", "dependency:build-classpath",
                     "-Dmdep.outputFile=" + cpFile.toString(),
-                    "-DincludeScope=compile")
+                    "-DincludeScope=test")
                     .directory(moduleDir.toFile())
                     .redirectErrorStream(true);
 
@@ -375,7 +375,7 @@ public class ProjectImporter {
                         }
                     }
                     McpLogger.info("ProjectImporter",
-                            "Added " + addedCount + " Maven dependencies for " + moduleDir.getFileName());
+                            "Added " + addedCount + " Maven dependencies (includeScope=test) for " + moduleDir.getFileName());
                 }
             } else {
                 McpLogger.warn("ProjectImporter",
