@@ -354,15 +354,7 @@ public class ExecutionTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error running Maven build: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error running Maven build: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("maven build", e);
         }
     }
 
@@ -533,15 +525,7 @@ public class ExecutionTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), exitCode != 0);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error running class: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error running class: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("run main", e);
         }
     }
 
@@ -651,7 +635,7 @@ public class ExecutionTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error listing tests: " + e.getMessage(), true);
+            return ToolErrors.errorResult("list tests", e);
         }
     }
 
@@ -1176,21 +1160,9 @@ public class ExecutionTools {
             }
 
         } catch (Exception e) {
-            McpLogger.error(LOG_TAG, "Exception during test run", e);
             // Ensure heartbeat is stopped even on exception
             heartbeatExecutor.shutdownNow();
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error running tests: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                String jsonResult = MAPPER.writeValueAsString(error);
-                McpLogger.info(LOG_TAG, "=== Test run finished (EXCEPTION) ===");
-                return new CallToolResult(jsonResult, true);
-            } catch (Exception ex) {
-                McpLogger.error(LOG_TAG, "Failed to serialize error result", ex);
-                return new CallToolResult("Error running tests: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("run tests", e);
         }
     }
 

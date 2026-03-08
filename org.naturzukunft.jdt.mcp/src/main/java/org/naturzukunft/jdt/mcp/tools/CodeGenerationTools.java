@@ -215,15 +215,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error adding method: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error adding method: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("add method", e);
         }
     }
 
@@ -398,15 +390,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error adding field: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error adding field: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("add field", e);
         }
     }
 
@@ -556,15 +540,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error adding imports: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error adding imports: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("add imports", e);
         }
     }
 
@@ -675,15 +651,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error implementing interface: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error implementing interface: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("implement interface", e);
         }
     }
 
@@ -868,7 +836,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error generating methods: " + e.getMessage(), true);
+            return ToolErrors.errorResult("generate methods", e);
         }
     }
 
@@ -1058,15 +1026,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error generating getters/setters: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error generating getters/setters: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("generate getters/setters", e);
         }
     }
 
@@ -1203,15 +1163,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error generating constructor: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error generating constructor: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("generate constructor", e);
         }
     }
 
@@ -1341,15 +1293,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error generating equals/hashCode: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error generating equals/hashCode: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("generate equals/hashCode", e);
         }
     }
 
@@ -1457,15 +1401,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error generating toString: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error generating toString: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("generate toString", e);
         }
     }
 
@@ -1632,7 +1568,7 @@ public class CodeGenerationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error generating delegate methods: " + e.getMessage(), true);
+            return ToolErrors.errorResult("generate delegate methods", e);
         }
     }
 

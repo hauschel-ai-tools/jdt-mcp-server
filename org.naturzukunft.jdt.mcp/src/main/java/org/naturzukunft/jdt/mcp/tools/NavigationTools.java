@@ -117,7 +117,7 @@ public class NavigationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding types: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find type", e);
         }
     }
 
@@ -205,7 +205,7 @@ public class NavigationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting method signature: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get method signature", e);
         }
     }
 
@@ -287,7 +287,7 @@ public class NavigationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding implementations: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find implementations", e);
         }
     }
 
@@ -401,7 +401,7 @@ public class NavigationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding callers: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find callers", e);
         }
     }
 

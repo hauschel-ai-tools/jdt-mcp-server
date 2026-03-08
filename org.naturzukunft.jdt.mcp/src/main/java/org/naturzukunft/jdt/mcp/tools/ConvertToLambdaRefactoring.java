@@ -195,7 +195,7 @@ class ConvertToLambdaRefactoring {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error converting to lambda: " + e.getMessage(), true);
+            return ToolErrors.errorResult("convert to lambda", e);
         }
     }
 }

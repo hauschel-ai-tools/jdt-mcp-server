@@ -106,7 +106,7 @@ public class CodeAnalysisTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error parsing file: " + e.getMessage(), true);
+            return ToolErrors.errorResult("parse java file", e);
         }
     }
 
@@ -211,7 +211,7 @@ public class CodeAnalysisTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting type hierarchy: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get type hierarchy", e);
         }
     }
 
@@ -298,7 +298,7 @@ public class CodeAnalysisTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding references: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find references", e);
         }
     }
 
@@ -406,7 +406,7 @@ public class CodeAnalysisTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting source: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get source range", e);
         }
     }
 

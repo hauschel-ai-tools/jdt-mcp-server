@@ -177,15 +177,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error during extract method: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error during extract method: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("extract method", e);
         }
     }
 
@@ -305,20 +297,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            McpLogger.error("RefactoringTools", "moveType failed: " + msg, e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error during move: " + msg);
-            error.put("exceptionType", e.getClass().getSimpleName());
-            if (e.getCause() != null) {
-                error.put("cause", e.getCause().toString());
-            }
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error during move: " + msg, true);
-            }
+            return ToolErrors.errorResult("move type", e);
         }
     }
 
@@ -479,9 +458,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), true);
 
         } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            McpLogger.error("RefactoringTools", "inlineElement failed: " + msg, e);
-            return new CallToolResult("Error during inline: " + msg, true);
+            return ToolErrors.errorResult("inline", e);
         }
     }
 
@@ -636,20 +613,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            McpLogger.error("RefactoringTools", "changeMethodSignature failed: " + msg, e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error changing method signature: " + msg);
-            error.put("exceptionType", e.getClass().getSimpleName());
-            if (e.getCause() != null) {
-                error.put("cause", e.getCause().toString());
-            }
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error changing method signature: " + msg, true);
-            }
+            return ToolErrors.errorResult("change method signature", e);
         }
     }
 
@@ -764,7 +728,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error encapsulating field: " + e.getMessage(), true);
+            return ToolErrors.errorResult("encapsulate field", e);
         }
     }
 
@@ -879,7 +843,7 @@ public class RefactoringTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error introducing parameter: " + e.getMessage(), true);
+            return ToolErrors.errorResult("introduce parameter", e);
         }
     }
 

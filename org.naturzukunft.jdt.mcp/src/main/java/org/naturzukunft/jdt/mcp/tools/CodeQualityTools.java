@@ -162,7 +162,7 @@ public class CodeQualityTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding unused code: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find unused code", e);
         }
     }
 
@@ -260,7 +260,7 @@ public class CodeQualityTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding dead code: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find dead code", e);
         }
     }
 }

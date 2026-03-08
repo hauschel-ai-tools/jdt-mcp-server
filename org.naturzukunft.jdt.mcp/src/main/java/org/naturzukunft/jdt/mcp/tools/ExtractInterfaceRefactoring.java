@@ -240,7 +240,7 @@ class ExtractInterfaceRefactoring {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error extracting interface: " + e.getMessage(), true);
+            return ToolErrors.errorResult("extract interface", e);
         }
     }
 

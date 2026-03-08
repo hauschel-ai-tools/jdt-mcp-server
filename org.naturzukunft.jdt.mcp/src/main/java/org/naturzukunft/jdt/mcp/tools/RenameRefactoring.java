@@ -207,30 +207,7 @@ class RenameRefactoring {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            if (e.getCause() != null) {
-                msg += " caused by: " + e.getCause();
-            }
-            error.put("message", "Error during rename: " + msg);
-            error.put("exceptionType", e.getClass().getSimpleName());
-
-            StackTraceElement[] stack = e.getStackTrace();
-            if (stack.length > 0) {
-                int limit = Math.min(stack.length, 5);
-                List<String> frames = new java.util.ArrayList<>();
-                for (int i = 0; i < limit; i++) {
-                    frames.add(stack[i].toString());
-                }
-                error.put("stackTrace", frames);
-            }
-
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error during rename: " + msg, true);
-            }
+            return ToolErrors.errorResult("rename", e);
         }
     }
 
@@ -437,16 +414,7 @@ class RenameRefactoring {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            error.put("message", "Error during AST-based rename: " + msg);
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error during AST-based rename: " + msg, true);
-            }
+            return ToolErrors.errorResult("AST-based rename", e);
         }
     }
 

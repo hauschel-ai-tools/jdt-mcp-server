@@ -125,7 +125,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error listing projects: " + e.getMessage(), true);
+            return ToolErrors.errorResult("list projects", e);
         }
     }
 
@@ -283,7 +283,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting classpath: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get classpath", e);
         }
     }
 
@@ -353,7 +353,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting compilation errors: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get compilation errors", e);
         }
     }
 
@@ -419,7 +419,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting project structure: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get project structure", e);
         }
     }
 
@@ -480,7 +480,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error refreshing: " + e.getMessage(), true);
+            return ToolErrors.errorResult("refresh project", e);
         }
     }
 
@@ -552,7 +552,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error updating Maven project: " + e.getMessage(), true);
+            return ToolErrors.errorResult("maven update project", e);
         }
     }
 
@@ -614,7 +614,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error importing project: " + e.getMessage(), true);
+            return ToolErrors.errorResult("import project", e);
         }
     }
 
@@ -666,7 +666,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error removing project: " + e.getMessage(), true);
+            return ToolErrors.errorResult("remove project", e);
         }
     }
 
@@ -709,7 +709,7 @@ public class ProjectInfoTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error reloading workspace: " + e.getMessage(), true);
+            return ToolErrors.errorResult("reload workspace", e);
         }
     }
 

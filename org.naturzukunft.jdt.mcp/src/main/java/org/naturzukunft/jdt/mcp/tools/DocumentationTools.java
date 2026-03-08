@@ -114,7 +114,7 @@ public class DocumentationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting Javadoc: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get javadoc", e);
         }
     }
 
@@ -200,7 +200,7 @@ public class DocumentationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error getting annotations: " + e.getMessage(), true);
+            return ToolErrors.errorResult("get annotations", e);
         }
     }
 
@@ -319,7 +319,7 @@ public class DocumentationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error finding annotated elements: " + e.getMessage(), true);
+            return ToolErrors.errorResult("find annotated elements", e);
         }
     }
 
@@ -471,7 +471,7 @@ public class DocumentationTools {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            return new CallToolResult("Error generating Javadoc: " + e.getMessage(), true);
+            return ToolErrors.errorResult("generate javadoc", e);
         }
     }
 

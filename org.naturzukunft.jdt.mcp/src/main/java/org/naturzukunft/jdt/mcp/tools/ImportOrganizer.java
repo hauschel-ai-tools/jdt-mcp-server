@@ -207,15 +207,7 @@ class ImportOrganizer {
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("status", "ERROR");
-            error.put("message", "Error organizing imports: " + e.getMessage());
-            error.put("exceptionType", e.getClass().getSimpleName());
-            try {
-                return new CallToolResult(MAPPER.writeValueAsString(error), true);
-            } catch (Exception ex) {
-                return new CallToolResult("Error organizing imports: " + e.getMessage(), true);
-            }
+            return ToolErrors.errorResult("organize imports", e);
         }
     }
 }
