@@ -139,8 +139,12 @@ public class RefactoringTools {
                 checkStatus.merge(finalStatus);
             } catch (IllegalArgumentException e) {
                 String errorMsg = e.getMessage() != null ? e.getMessage() : e.toString();
+                // Log full stack trace to identify the exact source of the IAE
+                java.io.StringWriter sw = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(sw));
                 McpLogger.warn("RefactoringTools",
-                        "checkFinalConditions threw IAE, falling back to AST-based rename: " + errorMsg);
+                        "checkFinalConditions threw IAE, falling back to AST-based rename: " + errorMsg
+                        + "\nStack trace:\n" + sw.toString());
                 return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
@@ -1631,28 +1635,51 @@ public class RefactoringTools {
             // 1. Find all references via SearchEngine (before modifying anything)
             List<org.eclipse.jdt.core.search.SearchMatch> allMatches = new java.util.ArrayList<>();
             if (updateReferences) {
+                McpLogger.info("RefactoringTools", "AST rename: searching references for "
+                        + element.getClass().getSimpleName() + " '"
+                        + element.getElementName() + "' in "
+                        + (element.getJavaProject() != null ? element.getJavaProject().getElementName() : "null"));
+
                 org.eclipse.jdt.core.search.SearchPattern pattern =
                         org.eclipse.jdt.core.search.SearchPattern.createPattern(
                                 element,
                                 org.eclipse.jdt.core.search.IJavaSearchConstants.REFERENCES);
+                McpLogger.info("RefactoringTools", "AST rename: search pattern = "
+                        + (pattern != null ? pattern.getClass().getSimpleName() + ": " + pattern : "null"));
+
                 if (pattern != null) {
+                    org.eclipse.jdt.core.search.IJavaSearchScope scope =
+                            org.eclipse.jdt.core.search.SearchEngine.createWorkspaceScope();
+                    McpLogger.info("RefactoringTools", "AST rename: workspace scope enclosing projects = "
+                            + java.util.Arrays.toString(scope.enclosingProjectsAndJars()));
+
                     org.eclipse.jdt.core.search.SearchEngine engine =
                             new org.eclipse.jdt.core.search.SearchEngine();
+                    List<org.eclipse.jdt.core.search.SearchMatch> allMatchesIncludingPotential = new java.util.ArrayList<>();
                     engine.search(
                             pattern,
                             new org.eclipse.jdt.core.search.SearchParticipant[] {
                                     org.eclipse.jdt.core.search.SearchEngine.getDefaultSearchParticipant()
                             },
-                            org.eclipse.jdt.core.search.SearchEngine.createWorkspaceScope(),
+                            scope,
                             new org.eclipse.jdt.core.search.SearchRequestor() {
                                 @Override
                                 public void acceptSearchMatch(org.eclipse.jdt.core.search.SearchMatch match) {
+                                    allMatchesIncludingPotential.add(match);
                                     if (match.getAccuracy() == org.eclipse.jdt.core.search.SearchMatch.A_ACCURATE) {
                                         allMatches.add(match);
                                     }
                                 }
                             },
                             monitor);
+                    McpLogger.info("RefactoringTools", "AST rename: found " + allMatches.size()
+                            + " accurate matches, " + allMatchesIncludingPotential.size() + " total (incl. potential)");
+                    for (var m : allMatchesIncludingPotential) {
+                        McpLogger.debug("RefactoringTools", "  match: accuracy="
+                                + (m.getAccuracy() == org.eclipse.jdt.core.search.SearchMatch.A_ACCURATE ? "ACCURATE" : "POTENTIAL")
+                                + " resource=" + (m.getResource() != null ? m.getResource().getFullPath() : "null")
+                                + " offset=" + m.getOffset() + " length=" + m.getLength());
+                    }
                 }
             }
 
