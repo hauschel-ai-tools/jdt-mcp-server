@@ -876,30 +876,40 @@ public class RefactoringTools {
 
             // Apply the inline refactoring
             if (inlineMethod != null) {
-                RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
+                try {
+                    RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
 
-                List<String> inlineErrors = getRealErrors(checkStatus);
-                if (!inlineErrors.isEmpty()) {
+                    List<String> inlineErrors = getRealErrors(checkStatus);
+                    if (!inlineErrors.isEmpty()) {
+                        result.put("status", "ERROR");
+                        result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
+                        return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                    }
+
+                    if (previewOnly) {
+                        Change change = inlineMethod.createChange(new NullProgressMonitor());
+                        result.put("status", "PREVIEW");
+                        result.put("inlineType", "METHOD");
+                        result.put("changes", describeChange(change));
+                        return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                    }
+
+                    Change change = inlineMethod.createChange(new NullProgressMonitor());
+                    change.perform(new NullProgressMonitor());
+
+                    result.put("status", "SUCCESS");
+                    result.put("inlineType", "METHOD");
+                    result.put("message", "Method inlined successfully");
+                    return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                } catch (Exception applyEx) {
+                    String applyMsg = applyEx.getMessage() != null ? applyEx.getMessage() : applyEx.toString();
+                    McpLogger.error("RefactoringTools", "InlineMethod apply failed: " + applyMsg, applyEx);
                     result.put("status", "ERROR");
-                    result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
+                    result.put("message", "Inline method failed during final validation. " +
+                            "This typically happens when JDT cannot fully resolve bindings for the method body " +
+                            "(e.g., cross-module static factory methods). Detail: " + applyMsg);
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
-
-                if (previewOnly) {
-                    Change change = inlineMethod.createChange(new NullProgressMonitor());
-                    result.put("status", "PREVIEW");
-                    result.put("inlineType", "METHOD");
-                    result.put("changes", describeChange(change));
-                    return new CallToolResult(MAPPER.writeValueAsString(result), false);
-                }
-
-                Change change = inlineMethod.createChange(new NullProgressMonitor());
-                change.perform(new NullProgressMonitor());
-
-                result.put("status", "SUCCESS");
-                result.put("inlineType", "METHOD");
-                result.put("message", "Method inlined successfully");
-                return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
             result.put("status", "ERROR");
