@@ -335,7 +335,10 @@ public class DocumentationTools {
                                 "description", "Element to generate Javadoc for. CLASS: 'com.example.MyClass'. METHOD: 'com.example.MyClass#methodName'"),
                         "elementType", Map.of(
                                 "type", "string",
-                                "description", "Type of element: 'CLASS' or 'METHOD'")),
+                                "description", "Type of element: 'CLASS' or 'METHOD'"),
+                        "force", Map.of(
+                                "type", "boolean",
+                                "description", "Replace existing Javadoc (default: false). Use when existing Javadoc is incomplete (missing @param/@return/@throws tags)")),
                 List.of("elementName", "elementType"),
                 null, null, null);
 
@@ -343,16 +346,18 @@ public class DocumentationTools {
                 "jdt_generate_javadoc",
                 "Generate Javadoc comment stub for a class or method. " +
                 "For methods: generates @param for each parameter, @return (if not void), @throws for declared exceptions. " +
-                "Inserts the Javadoc directly before the element in the source file.",
+                "Inserts the Javadoc directly before the element in the source file. " +
+                "Use force=true to replace existing incomplete Javadoc.",
                 schema,
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateJavadoc(
                 (String) args.get("elementName"),
-                (String) args.get("elementType")));
+                (String) args.get("elementType"),
+                Boolean.TRUE.equals(args.get("force"))));
     }
 
-    private static CallToolResult generateJavadoc(String elementName, String elementType) {
+    private static CallToolResult generateJavadoc(String elementName, String elementType, boolean force) {
         try {
             IMember member = findMember(elementName, elementType);
             if (member == null) {
@@ -360,8 +365,8 @@ public class DocumentationTools {
             }
 
             // Check if already has Javadoc
-            if (member.getJavadocRange() != null) {
-                return new CallToolResult("Element already has Javadoc. Use jdt_get_javadoc to read it.", true);
+            if (member.getJavadocRange() != null && !force) {
+                return new CallToolResult("Element already has Javadoc. Use jdt_get_javadoc to read it, or use force=true to replace.", true);
             }
 
             ICompilationUnit cu = member.getCompilationUnit();
@@ -408,12 +413,31 @@ public class DocumentationTools {
 
             javadoc.append(" */\n");
 
-            // Get insert position (before the member declaration)
-            ISourceRange sourceRange = member.getSourceRange();
-            int insertOffset = sourceRange.getOffset();
-
-            // Get current source and insert Javadoc
+            // Get current source
             String source = cu.getSource();
+
+            // Determine insert position and whether to replace existing Javadoc
+            ISourceRange javadocRange = member.getJavadocRange();
+            ISourceRange sourceRange = member.getSourceRange();
+            int insertOffset;
+            int removeEnd;
+
+            if (javadocRange != null && force) {
+                // Replace existing Javadoc: remove from start of Javadoc to start of declaration
+                insertOffset = javadocRange.getOffset();
+                // Find the start of the line after the Javadoc comment ends
+                int javadocEnd = javadocRange.getOffset() + javadocRange.getLength();
+                // Skip whitespace/newlines between Javadoc end and the next code element
+                removeEnd = javadocEnd;
+                while (removeEnd < source.length() && (source.charAt(removeEnd) == ' '
+                        || source.charAt(removeEnd) == '\t' || source.charAt(removeEnd) == '\n'
+                        || source.charAt(removeEnd) == '\r')) {
+                    removeEnd++;
+                }
+            } else {
+                insertOffset = sourceRange.getOffset();
+                removeEnd = insertOffset;
+            }
 
             // Find proper indentation
             int lineStart = source.lastIndexOf('\n', insertOffset - 1) + 1;
@@ -431,7 +455,7 @@ public class DocumentationTools {
             // Create working copy and apply edit
             ICompilationUnit workingCopy = cu.getWorkingCopy(new NullProgressMonitor());
             try {
-                String newSource = source.substring(0, insertOffset) + indent + indentedJavadoc + source.substring(insertOffset);
+                String newSource = source.substring(0, insertOffset) + indent + indentedJavadoc + source.substring(removeEnd);
                 workingCopy.getBuffer().setContents(newSource);
                 workingCopy.commitWorkingCopy(true, new NullProgressMonitor());
             } finally {

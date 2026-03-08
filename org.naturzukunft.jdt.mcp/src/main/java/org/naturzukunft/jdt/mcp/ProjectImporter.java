@@ -401,10 +401,10 @@ public class ProjectImporter {
             return; // Nothing to wire up
         }
 
-        // For each project, scan its classpath JARs and replace any that match
-        // a workspace project with a CPE_PROJECT entry. This handles both direct
-        // and transitive dependencies — mvn dependency:build-classpath already
-        // resolved the full transitive tree as JARs.
+        // Two strategies to discover inter-project dependencies:
+        // 1. JAR matching: replace CPE_LIBRARY entries whose filename matches a workspace project
+        // 2. POM parsing: parse <dependencies> from pom.xml and match artifactIds to workspace projects
+        //    (needed when JARs aren't installed in ~/.m2/repository yet)
         int totalAdded = 0;
         for (IProject project : projects) {
             try {
@@ -415,24 +415,26 @@ public class ProjectImporter {
 
                 IClasspathEntry[] existing = javaProject.getRawClasspath();
                 List<IClasspathEntry> newClasspath = new ArrayList<>();
+                Set<String> existingProjectRefs = new HashSet<>();
                 List<IProject> referencedProjects = new ArrayList<>();
-                int replacedCount = 0;
+                int addedCount = 0;
 
+                // Strategy 1: Replace matching JAR entries with project entries
                 for (IClasspathEntry entry : existing) {
                     if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
                         String jarName = entry.getPath().lastSegment();
-                        // Check if this JAR matches any workspace project
                         IProject matchedProject = findMatchingWorkspaceProject(jarName, artifactToProject, project);
                         if (matchedProject != null) {
                             newClasspath.add(JavaCore.newProjectEntry(matchedProject.getFullPath()));
                             referencedProjects.add(matchedProject);
-                            replacedCount++;
+                            existingProjectRefs.add(matchedProject.getName());
+                            addedCount++;
                             continue;
                         }
                     }
-                    // Keep existing CPE_PROJECT entries (no duplicates)
                     if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
                         String projName = entry.getPath().lastSegment();
+                        existingProjectRefs.add(projName);
                         IProject refProject = ResourcesPlugin.getWorkspace().getRoot().getProject(projName);
                         if (refProject.exists()) {
                             referencedProjects.add(refProject);
@@ -441,16 +443,33 @@ public class ProjectImporter {
                     newClasspath.add(entry);
                 }
 
-                if (replacedCount > 0) {
+                // Strategy 2: Parse pom.xml <dependencies> for workspace project matches
+                // This catches dependencies whose JARs aren't in the local Maven repo
+                Path projectDir = Path.of(project.getLocation().toOSString());
+                Path pomFile = projectDir.resolve("pom.xml");
+                if (Files.exists(pomFile)) {
+                    List<String> depArtifactIds = readMavenDependencyArtifactIds(pomFile);
+                    for (String depArtifactId : depArtifactIds) {
+                        IProject depProject = artifactToProject.get(depArtifactId);
+                        if (depProject != null && !depProject.equals(project)
+                                && !existingProjectRefs.contains(depProject.getName())) {
+                            newClasspath.add(JavaCore.newProjectEntry(depProject.getFullPath()));
+                            referencedProjects.add(depProject);
+                            existingProjectRefs.add(depProject.getName());
+                            addedCount++;
+                        }
+                    }
+                }
+
+                if (addedCount > 0) {
                     javaProject.setRawClasspath(newClasspath.toArray(new IClasspathEntry[0]), monitor);
 
-                    // Set Eclipse project references (required by RefactoringScopeFactory)
                     IProjectDescription desc = project.getDescription();
                     desc.setReferencedProjects(referencedProjects.toArray(new IProject[0]));
                     project.setDescription(desc, monitor);
 
-                    totalAdded += replacedCount;
-                    McpLogger.info("ProjectImporter", "Added " + replacedCount +
+                    totalAdded += addedCount;
+                    McpLogger.info("ProjectImporter", "Added " + addedCount +
                             " project dependencies to " + project.getName());
                 }
             } catch (Exception e) {
@@ -499,6 +518,59 @@ public class ProjectImporter {
             }
         } catch (Exception e) {
             McpLogger.warn("ProjectImporter", "Could not read artifactId from " + pomFile + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Reads artifactIds from the &lt;dependencies&gt; section of a Maven pom.xml.
+     * Only reads direct child dependencies (not from dependencyManagement or profiles).
+     */
+    private static List<String> readMavenDependencyArtifactIds(Path pomFile) {
+        List<String> artifactIds = new ArrayList<>();
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(pomFile.toFile());
+
+            // Find <dependencies> direct child of project root
+            NodeList children = doc.getDocumentElement().getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                if (children.item(i) instanceof Element depsEl
+                        && "dependencies".equals(depsEl.getTagName())) {
+                    NodeList deps = depsEl.getChildNodes();
+                    for (int j = 0; j < deps.getLength(); j++) {
+                        if (deps.item(j) instanceof Element depEl
+                                && "dependency".equals(depEl.getTagName())) {
+                            // Skip test-scoped dependencies
+                            String scope = getChildText(depEl, "scope");
+                            if ("test".equals(scope)) {
+                                continue;
+                            }
+                            String artifactId = getChildText(depEl, "artifactId");
+                            if (artifactId != null) {
+                                artifactIds.add(artifactId);
+                            }
+                        }
+                    }
+                    break; // Only process first <dependencies> block
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter",
+                    "Could not read dependencies from " + pomFile + ": " + e.getMessage());
+        }
+        return artifactIds;
+    }
+
+    private static String getChildText(Element parent, String childTagName) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i) instanceof Element el
+                    && childTagName.equals(el.getTagName())) {
+                return el.getTextContent().trim();
+            }
         }
         return null;
     }

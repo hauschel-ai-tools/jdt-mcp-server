@@ -1013,7 +1013,7 @@ public class CodeGenerationTools {
                 // Generate getter
                 if (generateGetters) {
                     String getterName = (fieldType.equals("boolean") ? "is" : "get") + capitalizedName;
-                    if (type.getMethod(getterName, new String[0]) == null) {
+                    if (!type.getMethod(getterName, new String[0]).exists()) {
                         methodsToAdd.append("\n    public ").append(fieldType).append(" ")
                                 .append(getterName).append("() {\n")
                                 .append("        return this.").append(fieldName).append(";\n")
@@ -1026,7 +1026,7 @@ public class CodeGenerationTools {
                 if (generateSetters && !isFinal) {
                     String setterName = "set" + capitalizedName;
                     String[] paramTypes = new String[] { field.getTypeSignature() };
-                    if (type.getMethod(setterName, paramTypes) == null) {
+                    if (!type.getMethod(setterName, paramTypes).exists()) {
                         methodsToAdd.append("\n    public void ").append(setterName)
                                 .append("(").append(fieldType).append(" ").append(fieldName).append(") {\n")
                                 .append("        this.").append(fieldName).append(" = ").append(fieldName).append(";\n")

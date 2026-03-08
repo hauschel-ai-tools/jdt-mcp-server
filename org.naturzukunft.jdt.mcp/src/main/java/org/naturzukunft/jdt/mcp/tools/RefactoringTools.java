@@ -729,185 +729,100 @@ public class RefactoringTools {
                 return new CallToolResult("Not a Java source file: " + filePath, true);
             }
 
-            // Try inline local variable first
-            org.eclipse.jdt.internal.corext.refactoring.code.InlineTempRefactoring inlineTemp =
-                new org.eclipse.jdt.internal.corext.refactoring.code.InlineTempRefactoring(cu, offset, 0);
-
-            RefactoringStatus status = inlineTemp.checkInitialConditions(new NullProgressMonitor());
-
             Map<String, Object> result = new HashMap<>();
             result.put("filePath", filePath);
             result.put("offset", offset);
 
-            if (!status.hasError()) {
-                // Inline local variable
-                RefactoringStatus checkStatus = inlineTemp.checkAllConditions(new NullProgressMonitor());
-
-                List<String> inlineErrors = getRealErrors(checkStatus);
-                if (!inlineErrors.isEmpty()) {
-                    result.put("status", "ERROR");
-                    result.put("message", "Inline has errors: " + String.join("; ", inlineErrors));
-                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
-                }
-
-                if (previewOnly) {
-                    Change change = inlineTemp.createChange(new NullProgressMonitor());
-                    result.put("status", "PREVIEW");
-                    result.put("inlineType", "LOCAL_VARIABLE");
-                    result.put("changes", describeChange(change));
-                    return new CallToolResult(MAPPER.writeValueAsString(result), false);
-                }
-
-                Change change = inlineTemp.createChange(new NullProgressMonitor());
-                change.perform(new NullProgressMonitor());
-
-                result.put("status", "SUCCESS");
-                result.put("inlineType", "LOCAL_VARIABLE");
-                result.put("message", "Variable inlined successfully");
-                return new CallToolResult(MAPPER.writeValueAsString(result), false);
-            }
-
-            // InlineTemp didn't work — try InlineMethod (needs AST CompilationUnit)
-            org.eclipse.jdt.core.dom.ASTParser parser = org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
-            parser.setSource(cu);
-            parser.setProject(cu.getJavaProject());
-            parser.setResolveBindings(true);
-            parser.setBindingsRecovery(true);
-            org.eclipse.jdt.core.dom.CompilationUnit astRoot =
-                (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(new NullProgressMonitor());
-
-            // Try creating InlineMethodRefactoring — first with given offset, then with
-            // method name range from Java Model if the offset hits a problematic AST node
-            org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring inlineMethod = null;
+            // Try inline local variable first
+            boolean inlineTempFailed = false;
             try {
-                inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
-                    cu, astRoot, offset, 0);
-            } catch (Exception createEx) {
-                McpLogger.warn("RefactoringTools", "InlineMethod.create() failed at offset " + offset +
-                        ", trying via Java Model: " + createEx);
-            }
+                org.eclipse.jdt.internal.corext.refactoring.code.InlineTempRefactoring inlineTemp =
+                    new org.eclipse.jdt.internal.corext.refactoring.code.InlineTempRefactoring(cu, offset, 0);
 
-            // Fallback: resolve IMethod at offset via Java Model and use its name range
-            if (inlineMethod == null) {
-                IJavaElement[] elements = cu.codeSelect(offset, 0);
-                for (IJavaElement el : elements) {
-                    if (el instanceof org.eclipse.jdt.core.IMethod method) {
-                        org.eclipse.jdt.core.ISourceRange nameRange = method.getNameRange();
-                        if (nameRange != null) {
-                            McpLogger.info("RefactoringTools", "Retrying InlineMethod with method name range: offset="
-                                    + nameRange.getOffset() + " length=" + nameRange.getLength());
-                            try {
-                                inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
-                                    cu, astRoot, nameRange.getOffset(), nameRange.getLength());
-                            } catch (Exception retryEx) {
-                                McpLogger.warn("RefactoringTools", "InlineMethod.create() retry also failed: " + retryEx);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
+                RefactoringStatus status = inlineTemp.checkInitialConditions(new NullProgressMonitor());
 
-            // Try checkInitialConditions — on NPE (cross-module binding issue), fall through
-            if (inlineMethod != null) {
-                try {
-                    RefactoringStatus methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
-                    if (methodStatus.hasError()) {
-                        inlineMethod = null;
-                    }
-                } catch (Exception initEx) {
-                    McpLogger.warn("RefactoringTools", "InlineMethod checkInitialConditions failed: " +
-                            (initEx.getMessage() != null ? initEx.getMessage() : initEx.toString()) +
-                            " — trying declaration-based approach");
-                    inlineMethod = null;
-                }
-            }
-
-            // Declaration-based fallback: parse the declaring CU with full bindings
-            // This fixes cross-module inlining where SourceAnalyzer gets null bindings
-            if (inlineMethod == null) {
-                IJavaElement[] declElements = cu.codeSelect(offset, 0);
-                for (IJavaElement el : declElements) {
-                    if (el instanceof org.eclipse.jdt.core.IMethod method) {
-                        ICompilationUnit declCU = method.getCompilationUnit();
-                        if (declCU != null) {
-                            McpLogger.info("RefactoringTools",
-                                    "Trying declaration-based inline for " + method.getElementName() +
-                                    " in " + declCU.getElementName());
-
-                            org.eclipse.jdt.core.dom.ASTParser declParser =
-                                    org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
-                            declParser.setSource(declCU);
-                            declParser.setProject(declCU.getJavaProject());
-                            declParser.setResolveBindings(true);
-                            declParser.setBindingsRecovery(true);
-                            declParser.setStatementsRecovery(true);
-                            org.eclipse.jdt.core.dom.CompilationUnit declAst =
-                                    (org.eclipse.jdt.core.dom.CompilationUnit) declParser.createAST(new NullProgressMonitor());
-
-                            org.eclipse.jdt.core.ISourceRange nameRange = method.getNameRange();
-                            if (nameRange != null) {
-                                try {
-                                    inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
-                                            declCU, declAst, nameRange.getOffset(), nameRange.getLength());
-                                } catch (Exception ex) {
-                                    McpLogger.warn("RefactoringTools",
-                                            "Declaration-based InlineMethod.create() failed: " + ex);
-                                }
-
-                                if (inlineMethod != null) {
-                                    try {
-                                        RefactoringStatus declStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
-                                        if (declStatus.hasError()) {
-                                            inlineMethod = null;
-                                        }
-                                    } catch (Exception ex) {
-                                        McpLogger.warn("RefactoringTools",
-                                                "Declaration-based checkInitialConditions also failed: " + ex);
-                                        inlineMethod = null;
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-
-            // Apply the inline refactoring
-            if (inlineMethod != null) {
-                try {
-                    RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
+                if (!status.hasError()) {
+                    RefactoringStatus checkStatus = inlineTemp.checkAllConditions(new NullProgressMonitor());
 
                     List<String> inlineErrors = getRealErrors(checkStatus);
                     if (!inlineErrors.isEmpty()) {
                         result.put("status", "ERROR");
-                        result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
+                        result.put("message", "Inline has errors: " + String.join("; ", inlineErrors));
                         return new CallToolResult(MAPPER.writeValueAsString(result), true);
                     }
 
                     if (previewOnly) {
-                        Change change = inlineMethod.createChange(new NullProgressMonitor());
+                        Change change = inlineTemp.createChange(new NullProgressMonitor());
                         result.put("status", "PREVIEW");
-                        result.put("inlineType", "METHOD");
+                        result.put("inlineType", "LOCAL_VARIABLE");
                         result.put("changes", describeChange(change));
                         return new CallToolResult(MAPPER.writeValueAsString(result), false);
                     }
 
-                    Change change = inlineMethod.createChange(new NullProgressMonitor());
+                    Change change = inlineTemp.createChange(new NullProgressMonitor());
                     change.perform(new NullProgressMonitor());
 
                     result.put("status", "SUCCESS");
-                    result.put("inlineType", "METHOD");
-                    result.put("message", "Method inlined successfully");
+                    result.put("inlineType", "LOCAL_VARIABLE");
+                    result.put("message", "Variable inlined successfully");
                     return new CallToolResult(MAPPER.writeValueAsString(result), false);
-                } catch (Exception applyEx) {
-                    String applyMsg = applyEx.getMessage() != null ? applyEx.getMessage() : applyEx.toString();
-                    McpLogger.error("RefactoringTools", "InlineMethod apply failed: " + applyMsg, applyEx);
+                }
+                inlineTempFailed = true;
+            } catch (Exception tempEx) {
+                // JDT internal error (e.g. NPE in SourceAnalyzer for static factory methods)
+                inlineTempFailed = true;
+            }
+
+            // InlineTemp didn't work — try InlineMethod
+            if (inlineTempFailed) {
+                try {
+                    org.eclipse.jdt.core.dom.ASTParser parser = org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
+                    parser.setSource(cu);
+                    parser.setResolveBindings(true);
+                    org.eclipse.jdt.core.dom.CompilationUnit astRoot =
+                        (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(new NullProgressMonitor());
+
+                    org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring inlineMethod =
+                        org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
+                            cu, astRoot, offset, 0);
+
+                    if (inlineMethod != null) {
+                        RefactoringStatus methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                        if (!methodStatus.hasError()) {
+                            RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
+
+                            List<String> inlineErrors = getRealErrors(checkStatus);
+                            if (!inlineErrors.isEmpty()) {
+                                result.put("status", "ERROR");
+                                result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
+                                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                            }
+
+                            if (previewOnly) {
+                                Change change = inlineMethod.createChange(new NullProgressMonitor());
+                                result.put("status", "PREVIEW");
+                                result.put("inlineType", "METHOD");
+                                result.put("changes", describeChange(change));
+                                return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                            }
+
+                            Change change = inlineMethod.createChange(new NullProgressMonitor());
+                            change.perform(new NullProgressMonitor());
+
+                            result.put("status", "SUCCESS");
+                            result.put("inlineType", "METHOD");
+                            result.put("message", "Method inlined successfully");
+                            return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                        }
+                    }
+                } catch (Exception methodEx) {
+                    // JDT internal error — NPE in SourceAnalyzer for certain method patterns
+                    // (e.g. static factory methods). This is a known JDT limitation in headless mode.
+                    String detail = methodEx.getMessage() != null ? methodEx.getMessage() : methodEx.getClass().getSimpleName();
                     result.put("status", "ERROR");
-                    result.put("message", "Inline method failed during final validation. " +
-                            "This typically happens when JDT cannot fully resolve bindings for the method body " +
-                            "(e.g., cross-module static factory methods). Detail: " + applyMsg);
+                    result.put("message", "Inline method not supported for this method. " +
+                            "JDT cannot inline certain patterns (e.g. static factory methods) in headless mode. " +
+                            "Detail: " + detail);
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
             }
@@ -1073,10 +988,10 @@ public class RefactoringTools {
                 String newImplements;
                 if (beforeBrace.contains("implements")) {
                     // Already has implements, add to list
-                    newImplements = beforeBrace.trim().replace("implements", "implements " + interfaceName + ",");
+                    newImplements = " " + beforeBrace.trim().replace("implements", "implements " + interfaceName + ",");
                 } else if (beforeBrace.contains("extends")) {
                     // Has extends but no implements
-                    newImplements = beforeBrace.trim() + " implements " + interfaceName;
+                    newImplements = " " + beforeBrace.trim() + " implements " + interfaceName;
                 } else {
                     // No extends or implements
                     newImplements = " implements " + interfaceName;

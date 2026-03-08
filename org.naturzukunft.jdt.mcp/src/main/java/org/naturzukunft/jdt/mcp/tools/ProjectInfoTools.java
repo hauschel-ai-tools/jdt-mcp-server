@@ -143,21 +143,30 @@ public class ProjectInfoTools {
             Map<String, Object> mavenInfo = new HashMap<>();
             String pomContent = new String(pomFile.getContents().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
 
-            // Extract groupId (first occurrence, not inside parent)
+            // Extract groupId — strip parent, dependencies, and dependencyManagement
+            // blocks to only match the project-level <groupId>
             java.util.regex.Pattern groupIdPattern = java.util.regex.Pattern.compile(
                 "^\\s*<groupId>([^<]+)</groupId>", java.util.regex.Pattern.MULTILINE);
-            java.util.regex.Matcher groupIdMatcher = groupIdPattern.matcher(pomContent);
-            // Skip if inside <parent> block - look for groupId after </parent> or at project level
-            String afterParent = pomContent.replaceFirst("<parent>[\\s\\S]*?</parent>", "");
-            groupIdMatcher = groupIdPattern.matcher(afterParent);
+            String projectLevel = pomContent.replaceFirst("<parent>[\\s\\S]*?</parent>", "");
+            projectLevel = projectLevel.replaceAll("<dependencies>[\\s\\S]*?</dependencies>", "");
+            projectLevel = projectLevel.replaceAll("<dependencyManagement>[\\s\\S]*?</dependencyManagement>", "");
+            java.util.regex.Matcher groupIdMatcher = groupIdPattern.matcher(projectLevel);
             if (groupIdMatcher.find()) {
                 mavenInfo.put("mavenGroupId", groupIdMatcher.group(1));
+            } else {
+                // Inherit groupId from parent
+                java.util.regex.Pattern parentGroupIdPattern = java.util.regex.Pattern.compile(
+                    "<parent>[\\s\\S]*?<groupId>([^<]+)</groupId>[\\s\\S]*?</parent>");
+                java.util.regex.Matcher parentGroupIdMatcher = parentGroupIdPattern.matcher(pomContent);
+                if (parentGroupIdMatcher.find()) {
+                    mavenInfo.put("mavenGroupId", parentGroupIdMatcher.group(1));
+                }
             }
 
             // Extract artifactId (first occurrence outside parent)
             java.util.regex.Pattern artifactIdPattern = java.util.regex.Pattern.compile(
                 "^\\s*<artifactId>([^<]+)</artifactId>", java.util.regex.Pattern.MULTILINE);
-            java.util.regex.Matcher artifactIdMatcher = artifactIdPattern.matcher(afterParent);
+            java.util.regex.Matcher artifactIdMatcher = artifactIdPattern.matcher(projectLevel);
             if (artifactIdMatcher.find()) {
                 mavenInfo.put("mavenArtifactId", artifactIdMatcher.group(1));
             }
