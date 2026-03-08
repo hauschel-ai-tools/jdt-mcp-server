@@ -4,7 +4,7 @@
 
 > **Note:** The GitHub repository is a read-only mirror. Please open issues and pull requests on [Forgejo](https://git.changinggraph.org/ai-tools/jdt-mcp-server).
 
-An MCP server (Model Context Protocol) that exposes Eclipse JDT features to AI coding assistants like Claude Code, Cursor, and others. It provides **44 tools** across 9 categories — covering navigation, refactoring, code generation, test execution, and more. Runs as a **standalone CLI** (stdio) without requiring the Eclipse IDE. Install with a single `curl | bash` command, then use it from any Java project.
+An MCP server (Model Context Protocol) that exposes Eclipse JDT features to AI coding assistants like Claude Code, Cursor, and others. It provides **52 tools** across 9 categories — covering navigation, refactoring, code generation, test execution, and more. Runs as a **standalone CLI** (stdio) without requiring the Eclipse IDE. Install with a single `curl | bash` command, then use it from any Java project.
 
 ---
 
@@ -16,7 +16,7 @@ MCP-Server (Model Context Protocol) für Java Development Tools (JDT). Stellt JD
 
 ## Features
 
-Der Server stellt **44 MCP-Tools** in 9 Kategorien bereit:
+Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 
 ### Project Info (5 Tools)
 
@@ -307,6 +307,13 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 ### Tests laufen zu lange
 
 `jdt_start_tests_async` statt `jdt_run_tests` verwenden. MCP-Client-Timeout ist 60s.
+
+## Bekannte Einschränkungen
+
+| Einschränkung | Betroffenes Tool | Ursache |
+|---|---|---|
+| `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus |
+| `jdt_extract_interface` nutzt String-Manipulation statt ASTRewrite | `jdt_extract_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen |
 
 ## Entwicklung
 
