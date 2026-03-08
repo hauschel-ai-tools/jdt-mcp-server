@@ -56,6 +56,15 @@ public class HeadlessApplication implements IApplication {
         try {
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
 
+            // Remember all import roots before clearing
+            java.util.Set<Path> importRoots = ProjectImporter.getImportedRoots();
+            if (importRoots.isEmpty()) {
+                // Fallback: if no roots tracked (e.g. first run before tracking was added),
+                // use the working directory
+                importRoots = java.util.Set.of(Path.of(System.getProperty("user.dir")));
+            }
+            McpLogger.info("HeadlessApplication", "Import roots to reload: " + importRoots);
+
             // Remove all projects from workspace (keep files on disk)
             IProject[] existing = workspace.getRoot().getProjects();
             McpLogger.info("HeadlessApplication", "Removing " + existing.length + " project(s) from workspace");
@@ -63,13 +72,33 @@ public class HeadlessApplication implements IApplication {
                 project.delete(false, true, new NullProgressMonitor());
             }
 
-            // Re-import from working directory
-            String workDir = System.getProperty("user.dir");
-            List<IProject> projects = ProjectImporter.importFromDirectory(
-                    Path.of(workDir), new NullProgressMonitor());
+            // Clear tracked roots so they get re-added during import
+            ProjectImporter.clearImportedRoots();
 
-            McpLogger.info("HeadlessApplication", "Re-imported " + projects.size() + " project(s):");
-            for (IProject project : projects) {
+            // Re-import from all previously imported roots
+            List<IProject> allProjects = new java.util.ArrayList<>();
+            for (Path root : importRoots) {
+                List<IProject> projects = ProjectImporter.importFromDirectory(
+                        root, new NullProgressMonitor());
+                allProjects.addAll(projects);
+            }
+
+            // Wire up inter-project dependencies across all import roots
+            if (allProjects.size() > 1) {
+                org.eclipse.jdt.core.IJavaProject[] allJavaProjects = org.eclipse.jdt.core.JavaCore
+                        .create(workspace.getRoot()).getJavaProjects();
+                List<IProject> allWorkspaceProjects = new java.util.ArrayList<>();
+                for (org.eclipse.jdt.core.IJavaProject jp : allJavaProjects) {
+                    allWorkspaceProjects.add(jp.getProject());
+                }
+                if (allWorkspaceProjects.size() > 1) {
+                    ProjectImporter.setupInterProjectDependencies(
+                            allWorkspaceProjects, new NullProgressMonitor());
+                }
+            }
+
+            McpLogger.info("HeadlessApplication", "Re-imported " + allProjects.size() + " project(s):");
+            for (IProject project : allProjects) {
                 McpLogger.info("HeadlessApplication", "  - " + project.getName() +
                         " (" + project.getLocation() + ")");
             }
@@ -78,7 +107,7 @@ public class HeadlessApplication implements IApplication {
             workspace.build(IncrementalProjectBuilder.FULL_BUILD, new NullProgressMonitor());
             McpLogger.info("HeadlessApplication", "Workspace rebuild completed");
 
-            return projects;
+            return allProjects;
         } finally {
             readyLatch.countDown();
             McpLogger.info("HeadlessApplication", "Reload workspace finished — ready for requests");

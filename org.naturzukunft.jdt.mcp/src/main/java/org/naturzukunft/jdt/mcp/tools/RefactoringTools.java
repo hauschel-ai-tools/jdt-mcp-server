@@ -779,7 +779,20 @@ public class RefactoringTools {
                     cu, astRoot, offset, 0);
 
             if (inlineMethod != null) {
-                RefactoringStatus methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                RefactoringStatus methodStatus;
+                try {
+                    methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                } catch (Exception initEx) {
+                    // JDT InlineMethodRefactoring can throw NPE for unsupported method types
+                    // (e.g. static factory methods where VariableDeclaration cannot be resolved)
+                    String initMsg = initEx.getMessage() != null ? initEx.getMessage() : initEx.toString();
+                    McpLogger.warn("RefactoringTools", "InlineMethod checkInitialConditions failed: " + initMsg);
+                    result.put("status", "ERROR");
+                    result.put("message", "Inline method not supported at this position. " +
+                            "The method may use patterns not supported for inline refactoring (e.g. static factory methods). " +
+                            "Detail: " + initMsg);
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
                 if (!methodStatus.hasError()) {
                     RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
 
@@ -1166,9 +1179,10 @@ public class RefactoringTools {
             result.put("methodName", methodName);
             result.put("newName", newName != null ? newName : methodName);
 
-            if (status.hasError()) {
+            List<String> realErrors = getRealErrors(status);
+            if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Change signature has errors: " + status.toString());
+                result.put("message", "Change signature has errors: " + String.join("; ", realErrors));
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 

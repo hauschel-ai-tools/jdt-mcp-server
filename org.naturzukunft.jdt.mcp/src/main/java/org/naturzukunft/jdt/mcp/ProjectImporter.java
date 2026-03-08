@@ -35,6 +35,26 @@ import org.w3c.dom.NodeList;
 public class ProjectImporter {
 
     /**
+     * Tracks all directories that were explicitly imported via {@link #importFromPath(Path, IProgressMonitor)}
+     * or {@link #importFromDirectory(Path, IProgressMonitor)}. Used by reload to re-import all roots.
+     */
+    private static final Set<Path> importedRoots = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Returns all directories that were previously imported, for use by workspace reload.
+     */
+    public static Set<Path> getImportedRoots() {
+        return Set.copyOf(importedRoots);
+    }
+
+    /**
+     * Clears the tracked import roots (used before re-populating during reload).
+     */
+    public static void clearImportedRoots() {
+        importedRoots.clear();
+    }
+
+    /**
      * Imports projects from the given directory into the workspace.
      *
      * @param directory the root directory to import from
@@ -48,6 +68,9 @@ public class ProjectImporter {
             McpLogger.error("ProjectImporter", "Not a directory: " + directory);
             return imported;
         }
+
+        // Track this directory as an import root for reload
+        importedRoots.add(directory.toAbsolutePath().normalize());
 
         Path pomFile = directory.resolve("pom.xml");
         Path projectFile = directory.resolve(".project");
@@ -360,7 +383,7 @@ public class ProjectImporter {
      * For each project, parses its pom.xml to find dependencies on other workspace projects,
      * then adds project entries to the classpath (replacing any matching JAR entries).
      */
-    private static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
+    static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
         // Build a map of artifactId -> IProject for all workspace projects
         Map<String, IProject> artifactToProject = new HashMap<>();
         for (IProject project : projects) {
