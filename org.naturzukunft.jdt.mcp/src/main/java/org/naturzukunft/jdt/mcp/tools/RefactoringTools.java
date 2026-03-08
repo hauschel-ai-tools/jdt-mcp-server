@@ -31,7 +31,6 @@ import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.TextEdit;
 import org.eclipse.jdt.core.refactoring.IJavaRefactorings;
 import org.eclipse.jdt.core.refactoring.descriptors.MoveDescriptor;
-import org.eclipse.jdt.core.refactoring.descriptors.RenameJavaElementDescriptor;
 import org.eclipse.ltk.core.refactoring.Change;
 import org.eclipse.ltk.core.refactoring.Refactoring;
 import org.eclipse.ltk.core.refactoring.RefactoringContribution;
@@ -108,81 +107,60 @@ public class RefactoringTools {
                 return new CallToolResult("Element not found: " + elementName + " (type: " + elementType + ")", true);
             }
 
-            // Determine the refactoring ID based on element type
-            String refactoringId = getRefactoringId(element);
-            if (refactoringId == null) {
-                return new CallToolResult("Unsupported element type for rename: " + element.getClass().getSimpleName(), true);
+            // Create rename processor directly (not via Descriptor API).
+            // Direct processor usage gives full control in headless mode and avoids
+            // the Descriptor abstraction layer which is optimized for UI workflows.
+            org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor processor =
+                    createRenameProcessor(element, newName, updateReferences);
+            if (processor == null) {
+                return new CallToolResult(
+                        "Unsupported element type for rename: " + element.getClass().getSimpleName(), true);
             }
 
-            // Get the refactoring contribution
-            RefactoringContribution contribution = RefactoringCore.getRefactoringContribution(refactoringId);
-            if (contribution == null) {
-                return new CallToolResult("Refactoring not available: " + refactoringId, true);
+            org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring refactoring =
+                    new org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring(processor);
+
+            // Step 1: checkInitialConditions — validates the element can be renamed
+            NullProgressMonitor monitor = new NullProgressMonitor();
+            RefactoringStatus checkStatus = refactoring.checkInitialConditions(monitor);
+            List<String> initErrors = getRealErrors(checkStatus);
+            if (!initErrors.isEmpty()) {
+                return renameErrorResult(elementName, newName, elementType, updateReferences,
+                        "Initial conditions failed: " + String.join("; ", initErrors), initErrors);
             }
 
-            // Create the rename descriptor
-            RenameJavaElementDescriptor descriptor = (RenameJavaElementDescriptor) contribution.createDescriptor();
-            descriptor.setJavaElement(element);
-            descriptor.setNewName(newName);
-            descriptor.setUpdateReferences(updateReferences);
-
-            // Configure additional options based on element type
-            if (element instanceof IType) {
-                descriptor.setUpdateQualifiedNames(false);
-                descriptor.setUpdateSimilarDeclarations(false);
-            } else if (element instanceof IMethod) {
-                descriptor.setKeepOriginal(false);
-                descriptor.setDeprecateDelegate(false);
-            } else if (element instanceof IField) {
-                // Don't rename getters/setters automatically — in headless mode,
-                // ProjectScope.getNode() throws IllegalArgumentException because
-                // project preferences are not initialized (#20)
-                descriptor.setRenameGetters(false);
-                descriptor.setRenameSetters(false);
-            }
-
-            // Create and check the refactoring.
-            // For field renames, checkAllConditions may throw IllegalArgumentException
-            // from ProjectScope.getNode() in headless mode (#22) — handled below.
-            // For participant errors (headless mode), retry once — participants self-remove after first failure.
-            boolean isFieldRename = element instanceof IField;
-            Refactoring refactoring = createAndCheckRefactoring(descriptor);
-            RefactoringStatus checkStatus;
-            boolean usedInitialConditionsOnly = false;
+            // Step 2: checkFinalConditions — THIS IS WHERE REFERENCES ARE SEARCHED.
+            // Without this step, createChange() produces an empty CompositeChange.
+            // In headless mode, ProjectScope.getNode() may throw IllegalArgumentException
+            // because Eclipse preferences are not initialized. If that happens,
+            // initialize preferences and retry with a fresh refactoring.
             try {
-                checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+                RefactoringStatus finalStatus = refactoring.checkFinalConditions(monitor);
+                checkStatus.merge(finalStatus);
             } catch (IllegalArgumentException e) {
-                if (!isFieldRename) {
-                    throw e;
-                }
-                // In headless mode, ProjectScope.getNode() throws IllegalArgumentException
-                // when Eclipse internally resolves getter/setter names during field rename (#22).
-                // Create a fresh refactoring (old one may be corrupted) and check initial conditions only.
                 McpLogger.warn("RefactoringTools",
-                        "Field rename: checkAllConditions failed with IllegalArgumentException "
-                        + "(headless ProjectScope issue #22), proceeding with initial conditions only");
-                refactoring = createAndCheckRefactoring(descriptor);
-                checkStatus = refactoring.checkInitialConditions(new NullProgressMonitor());
-                usedInitialConditionsOnly = true;
-            }
-
-            boolean hadParticipantErrors = hasParticipantErrors(checkStatus);
-            List<String> realErrors = getRealErrors(checkStatus);
-
-            if (hadParticipantErrors && realErrors.isEmpty() && !usedInitialConditionsOnly) {
-                // Participant errors corrupted the refactoring state — rebuild and retry
-                refactoring = createAndCheckRefactoring(descriptor);
+                        "checkFinalConditions threw IAE (headless preferences issue), "
+                        + "initializing preferences and retrying: " + e.getMessage());
+                initializeHeadlessPreferences(element);
+                // Old refactoring is corrupted — create fresh processor and refactoring
+                processor = createRenameProcessor(element, newName, updateReferences);
+                refactoring = new org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring(processor);
+                refactoring.checkInitialConditions(monitor);
                 try {
-                    checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
-                } catch (IllegalArgumentException e) {
-                    if (!isFieldRename) {
-                        throw e;
-                    }
-                    refactoring = createAndCheckRefactoring(descriptor);
-                    checkStatus = refactoring.checkInitialConditions(new NullProgressMonitor());
+                    RefactoringStatus retryStatus = refactoring.checkFinalConditions(monitor);
+                    checkStatus = retryStatus;
+                } catch (IllegalArgumentException e2) {
+                    McpLogger.warn("RefactoringTools",
+                            "checkFinalConditions failed again after preference init: " + e2.getMessage());
+                    return renameErrorResult(elementName, newName, elementType, updateReferences,
+                            "Rename failed in headless mode: checkFinalConditions throws "
+                            + "IllegalArgumentException even after preference initialization. "
+                            + "Root cause: " + e2.getMessage(), List.of(e2.getMessage()));
                 }
-                realErrors = getRealErrors(checkStatus);
             }
+
+            // Filter participant errors (harmless in headless mode — Launch/Breakpoint participants)
+            List<String> realErrors = getRealErrors(checkStatus);
 
             Map<String, Object> result = new HashMap<>();
             result.put("elementName", elementName);
@@ -202,13 +180,8 @@ public class RefactoringTools {
                 result.put("warnings", warnings);
             }
 
-            // In headless mode, checkFinalConditions may not have run (IAE fallback #22),
-            // leaving fParticipants null. createChange() would NPE (#24).
-            ensureParticipantsInitialized(refactoring);
-
             if (previewOnly) {
-                // Preview mode - just return what would be changed
-                Change change = refactoring.createChange(new NullProgressMonitor());
+                Change change = refactoring.createChange(monitor);
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of rename refactoring");
                 result.put("changes", describeChange(change));
@@ -216,27 +189,29 @@ public class RefactoringTools {
             }
 
             // Execute the refactoring
-            Change change = refactoring.createChange(new NullProgressMonitor());
+            Change change = refactoring.createChange(monitor);
             // Capture change description BEFORE perform (perform may clear children)
             Map<String, Object> changeDesc = describeChange(change);
-            change.perform(new NullProgressMonitor());
-            result.put("changes", changeDesc);
-
-            // Warn if no references were updated (declaration-only rename)
             int childCount = changeDesc.containsKey("childCount")
                     ? ((Number) changeDesc.get("childCount")).intValue() : -1;
-            if (childCount == 0 && updateReferences) {
-                result.put("status", "WARNING");
+
+            // Fail if no changes were produced — don't perform an empty change
+            if (childCount == 0) {
+                result.put("status", "ERROR");
                 result.put("message",
-                        "Rename applied to declaration only — no references were updated. " +
-                        "This may indicate missing inter-project dependencies in the workspace. " +
-                        "Try running jdt_maven_update_project or re-importing projects.");
-            } else {
-                result.put("status", "SUCCESS");
-                result.put("message", "Refactoring completed successfully");
+                        "Rename produced no changes (childCount: 0). "
+                        + "This may indicate that checkFinalConditions did not find any references, "
+                        + "or the element could not be renamed. "
+                        + "Try running jdt_maven_update_project or re-importing projects.");
+                result.put("changes", changeDesc);
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            // Add element details
+            change.perform(monitor);
+            result.put("changes", changeDesc);
+            result.put("status", "SUCCESS");
+            result.put("message", "Refactoring completed successfully");
+
             if (element.getResource() != null) {
                 result.put("file", element.getResource().getLocation().toString());
             }
@@ -253,7 +228,6 @@ public class RefactoringTools {
             error.put("message", "Error during rename: " + msg);
             error.put("exceptionType", e.getClass().getSimpleName());
 
-            // Include stack trace summary for debugging
             StackTraceElement[] stack = e.getStackTrace();
             if (stack.length > 0) {
                 int limit = Math.min(stack.length, 5);
@@ -1596,22 +1570,6 @@ public class RefactoringTools {
     }
 
     /**
-     * Get the appropriate refactoring ID for an element.
-     */
-    private static String getRefactoringId(IJavaElement element) {
-        if (element instanceof IType) {
-            return IJavaRefactorings.RENAME_TYPE;
-        } else if (element instanceof IMethod) {
-            return IJavaRefactorings.RENAME_METHOD;
-        } else if (element instanceof IField) {
-            return IJavaRefactorings.RENAME_FIELD;
-        } else if (element instanceof ICompilationUnit) {
-            return IJavaRefactorings.RENAME_COMPILATION_UNIT;
-        }
-        return null;
-    }
-
-    /**
      * Extract messages from RefactoringStatus.
      */
     private static List<String> extractStatusMessages(RefactoringStatus status) {
@@ -1621,52 +1579,98 @@ public class RefactoringTools {
     }
 
     /**
-     * Creates a Refactoring from a descriptor, throwing if creation fails.
+     * Creates the appropriate RenameProcessor for a Java element.
+     * Direct processor usage (instead of Descriptor API) gives full control in headless mode.
      */
-    private static Refactoring createAndCheckRefactoring(RenameJavaElementDescriptor descriptor) throws Exception {
-        RefactoringStatus status = new RefactoringStatus();
-        Refactoring refactoring = descriptor.createRefactoring(status);
-        if (refactoring == null) {
-            throw new IllegalStateException("Could not create refactoring: " + status.toString());
+    private static org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor
+            createRenameProcessor(IJavaElement element, String newName, boolean updateReferences)
+            throws CoreException {
+        org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor processor = null;
+
+        if (element instanceof IField field) {
+            var fieldProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameFieldProcessor(field);
+            fieldProcessor.setRenameGetter(false);
+            fieldProcessor.setRenameSetter(false);
+            fieldProcessor.setUpdateReferences(updateReferences);
+            fieldProcessor.setUpdateTextualMatches(false);
+            processor = fieldProcessor;
+        } else if (element instanceof IMethod method) {
+            if (isVirtualMethod(method)) {
+                var virtualProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameVirtualMethodProcessor(method);
+                virtualProcessor.setUpdateReferences(updateReferences);
+                processor = virtualProcessor;
+            } else {
+                var nonVirtualProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameNonVirtualMethodProcessor(method);
+                nonVirtualProcessor.setUpdateReferences(updateReferences);
+                processor = nonVirtualProcessor;
+            }
+        } else if (element instanceof IType) {
+            var typeProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameTypeProcessor(element.getJavaProject().findType(((IType) element).getFullyQualifiedName()));
+            typeProcessor.setUpdateReferences(updateReferences);
+            typeProcessor.setUpdateQualifiedNames(false);
+            typeProcessor.setUpdateSimilarDeclarations(false);
+            processor = typeProcessor;
         }
-        return refactoring;
+
+        if (processor != null) {
+            processor.setNewElementName(newName);
+        }
+        return processor;
     }
 
     /**
-     * Ensures that the internal fParticipants list is initialized in a ProcessorBasedRefactoring.
-     * In headless mode, checkFinalConditions may throw IllegalArgumentException before initializing
-     * fParticipants, causing createChange() to throw NPE (#24). This method uses reflection to
-     * set fParticipants to an empty list if it is still null.
+     * Checks if a method is virtual (interface method, overridden method, etc.).
+     * Virtual methods need RenameVirtualMethodProcessor to update all implementations.
      */
-    private static void ensureParticipantsInitialized(Refactoring refactoring) {
+    private static boolean isVirtualMethod(IMethod method) {
         try {
-            var clazz = Class.forName("org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring");
-            if (!clazz.isInstance(refactoring)) {
-                return;
-            }
-            java.lang.reflect.Field field = clazz.getDeclaredField("fParticipants");
-            field.setAccessible(true);
-            if (field.get(refactoring) == null) {
-                field.set(refactoring, java.util.Collections.emptyList());
-                McpLogger.warn("RefactoringTools",
-                        "fParticipants was null — initialized to empty list via reflection (#24)");
+            return org.eclipse.jdt.internal.corext.refactoring.rename.MethodChecks.isVirtual(method);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Initializes Eclipse preferences that are missing in headless mode.
+     * ProjectScope.getNode() needs an initialized IEclipsePreferences tree.
+     */
+    private static void initializeHeadlessPreferences(IJavaElement element) {
+        try {
+            IJavaProject javaProject = element.getJavaProject();
+            if (javaProject != null) {
+                org.eclipse.core.resources.IProject project = javaProject.getProject();
+                org.eclipse.core.runtime.preferences.IScopeContext projectScope =
+                        new org.eclipse.core.resources.ProjectScope(project);
+                org.osgi.service.prefs.Preferences prefs =
+                        projectScope.getNode(JavaCore.PLUGIN_ID);
+                prefs.flush();
+                McpLogger.info("RefactoringTools",
+                        "Initialized headless preferences for project: " + project.getName());
             }
         } catch (Exception e) {
             McpLogger.warn("RefactoringTools",
-                    "Could not check/initialize fParticipants: " + e.getMessage());
+                    "Could not initialize headless preferences: " + e.getMessage());
         }
     }
 
     /**
-     * Checks if a RefactoringStatus contains participant errors (harmless in headless mode).
+     * Creates an error result for rename operations.
      */
-    private static boolean hasParticipantErrors(RefactoringStatus status) {
-        for (var entry : status.getEntries()) {
-            if (entry.getMessage() != null && entry.getMessage().contains("participant")) {
-                return true;
-            }
+    private static CallToolResult renameErrorResult(String elementName, String newName,
+            String elementType, boolean updateReferences, String message, List<String> errors) {
+        try {
+            Map<String, Object> result = new HashMap<>();
+            result.put("elementName", elementName);
+            result.put("newName", newName);
+            result.put("elementType", elementType);
+            result.put("updateReferences", updateReferences);
+            result.put("status", "ERROR");
+            result.put("message", message);
+            result.put("errors", errors);
+            return new CallToolResult(MAPPER.writeValueAsString(result), true);
+        } catch (Exception e) {
+            return new CallToolResult("Error during rename: " + message, true);
         }
-        return false;
     }
 
     /**
