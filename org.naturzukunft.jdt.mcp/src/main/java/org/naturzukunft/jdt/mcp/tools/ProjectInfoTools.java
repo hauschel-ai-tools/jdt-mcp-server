@@ -594,10 +594,11 @@ public class ProjectInfoTools {
 
             List<IProject> imported = ProjectImporter.importFromPath(projectPath, new NullProgressMonitor());
 
-            // Trigger build so JDT creates problem markers (compilation errors)
+            // Trigger FULL build so JDT creates problem markers (compilation errors).
+            // FULL_BUILD is needed because newly created projects have no prior build state.
             if (!imported.isEmpty()) {
                 ResourcesPlugin.getWorkspace().build(
-                        org.eclipse.core.resources.IncrementalProjectBuilder.INCREMENTAL_BUILD,
+                        org.eclipse.core.resources.IncrementalProjectBuilder.FULL_BUILD,
                         new NullProgressMonitor());
             }
 

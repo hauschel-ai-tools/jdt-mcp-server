@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.eclipse.core.resources.ICommand;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IProjectDescription;
 import org.eclipse.core.resources.IWorkspace;
@@ -210,6 +211,12 @@ public class ProjectImporter {
             description.setLocation(new org.eclipse.core.runtime.Path(moduleDir.toString()));
             description.setNatureIds(new String[] { JavaCore.NATURE_ID });
 
+            // Explicitly add the Java builder — in headless mode, nature.configure()
+            // during project.open() may not reliably add the builder to the build spec
+            ICommand buildCommand = description.newCommand();
+            buildCommand.setBuilderName(JavaCore.BUILDER_ID);
+            description.setBuildSpec(new ICommand[] { buildCommand });
+
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
                 project.open(monitor);
@@ -269,6 +276,11 @@ public class ProjectImporter {
             IProjectDescription description = workspace.newProjectDescription(projectName);
             description.setLocation(new org.eclipse.core.runtime.Path(projectDir.toString()));
             description.setNatureIds(new String[] { JavaCore.NATURE_ID });
+
+            // Explicitly add the Java builder for headless mode reliability
+            ICommand buildCommand = description.newCommand();
+            buildCommand.setBuilderName(JavaCore.BUILDER_ID);
+            description.setBuildSpec(new ICommand[] { buildCommand });
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
@@ -704,6 +716,11 @@ public class ProjectImporter {
             IProjectDescription description = workspace.newProjectDescription(projectName);
             description.setLocation(new org.eclipse.core.runtime.Path(projectDir.toString()));
             description.setNatureIds(new String[] { JavaCore.NATURE_ID });
+
+            // Explicitly add the Java builder for headless mode reliability
+            ICommand buildCommand = description.newCommand();
+            buildCommand.setBuilderName(JavaCore.BUILDER_ID);
+            description.setBuildSpec(new ICommand[] { buildCommand });
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
