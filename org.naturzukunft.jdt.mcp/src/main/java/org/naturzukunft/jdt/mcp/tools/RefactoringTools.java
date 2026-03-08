@@ -770,7 +770,9 @@ public class RefactoringTools {
             // InlineTemp didn't work — try InlineMethod (needs AST CompilationUnit)
             org.eclipse.jdt.core.dom.ASTParser parser = org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
             parser.setSource(cu);
+            parser.setProject(cu.getJavaProject());
             parser.setResolveBindings(true);
+            parser.setBindingsRecovery(true);
             org.eclipse.jdt.core.dom.CompilationUnit astRoot =
                 (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(new NullProgressMonitor());
 
