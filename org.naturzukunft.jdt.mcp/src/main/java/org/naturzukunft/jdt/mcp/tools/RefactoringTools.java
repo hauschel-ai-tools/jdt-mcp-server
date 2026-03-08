@@ -808,45 +808,98 @@ public class RefactoringTools {
                 }
             }
 
+            // Try checkInitialConditions — on NPE (cross-module binding issue), fall through
             if (inlineMethod != null) {
-                RefactoringStatus methodStatus;
                 try {
-                    methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                    RefactoringStatus methodStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                    if (methodStatus.hasError()) {
+                        inlineMethod = null;
+                    }
                 } catch (Exception initEx) {
-                    String initMsg = initEx.getMessage() != null ? initEx.getMessage() : initEx.toString();
-                    McpLogger.warn("RefactoringTools", "InlineMethod checkInitialConditions failed: " + initMsg);
+                    McpLogger.warn("RefactoringTools", "InlineMethod checkInitialConditions failed: " +
+                            (initEx.getMessage() != null ? initEx.getMessage() : initEx.toString()) +
+                            " — trying declaration-based approach");
+                    inlineMethod = null;
+                }
+            }
+
+            // Declaration-based fallback: parse the declaring CU with full bindings
+            // This fixes cross-module inlining where SourceAnalyzer gets null bindings
+            if (inlineMethod == null) {
+                IJavaElement[] declElements = cu.codeSelect(offset, 0);
+                for (IJavaElement el : declElements) {
+                    if (el instanceof org.eclipse.jdt.core.IMethod method) {
+                        ICompilationUnit declCU = method.getCompilationUnit();
+                        if (declCU != null) {
+                            McpLogger.info("RefactoringTools",
+                                    "Trying declaration-based inline for " + method.getElementName() +
+                                    " in " + declCU.getElementName());
+
+                            org.eclipse.jdt.core.dom.ASTParser declParser =
+                                    org.eclipse.jdt.core.dom.ASTParser.newParser(org.eclipse.jdt.core.dom.AST.getJLSLatest());
+                            declParser.setSource(declCU);
+                            declParser.setProject(declCU.getJavaProject());
+                            declParser.setResolveBindings(true);
+                            declParser.setBindingsRecovery(true);
+                            declParser.setStatementsRecovery(true);
+                            org.eclipse.jdt.core.dom.CompilationUnit declAst =
+                                    (org.eclipse.jdt.core.dom.CompilationUnit) declParser.createAST(new NullProgressMonitor());
+
+                            org.eclipse.jdt.core.ISourceRange nameRange = method.getNameRange();
+                            if (nameRange != null) {
+                                try {
+                                    inlineMethod = org.eclipse.jdt.internal.corext.refactoring.code.InlineMethodRefactoring.create(
+                                            declCU, declAst, nameRange.getOffset(), nameRange.getLength());
+                                } catch (Exception ex) {
+                                    McpLogger.warn("RefactoringTools",
+                                            "Declaration-based InlineMethod.create() failed: " + ex);
+                                }
+
+                                if (inlineMethod != null) {
+                                    try {
+                                        RefactoringStatus declStatus = inlineMethod.checkInitialConditions(new NullProgressMonitor());
+                                        if (declStatus.hasError()) {
+                                            inlineMethod = null;
+                                        }
+                                    } catch (Exception ex) {
+                                        McpLogger.warn("RefactoringTools",
+                                                "Declaration-based checkInitialConditions also failed: " + ex);
+                                        inlineMethod = null;
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Apply the inline refactoring
+            if (inlineMethod != null) {
+                RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
+
+                List<String> inlineErrors = getRealErrors(checkStatus);
+                if (!inlineErrors.isEmpty()) {
                     result.put("status", "ERROR");
-                    result.put("message", "Inline method not supported at this position. " +
-                            "The method may use patterns not supported for inline refactoring. " +
-                            "Detail: " + initMsg);
+                    result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
                     return new CallToolResult(MAPPER.writeValueAsString(result), true);
                 }
-                if (!methodStatus.hasError()) {
-                    RefactoringStatus checkStatus = inlineMethod.checkAllConditions(new NullProgressMonitor());
 
-                    List<String> inlineErrors = getRealErrors(checkStatus);
-                    if (!inlineErrors.isEmpty()) {
-                        result.put("status", "ERROR");
-                        result.put("message", "Inline method has errors: " + String.join("; ", inlineErrors));
-                        return new CallToolResult(MAPPER.writeValueAsString(result), true);
-                    }
-
-                    if (previewOnly) {
-                        Change change = inlineMethod.createChange(new NullProgressMonitor());
-                        result.put("status", "PREVIEW");
-                        result.put("inlineType", "METHOD");
-                        result.put("changes", describeChange(change));
-                        return new CallToolResult(MAPPER.writeValueAsString(result), false);
-                    }
-
+                if (previewOnly) {
                     Change change = inlineMethod.createChange(new NullProgressMonitor());
-                    change.perform(new NullProgressMonitor());
-
-                    result.put("status", "SUCCESS");
+                    result.put("status", "PREVIEW");
                     result.put("inlineType", "METHOD");
-                    result.put("message", "Method inlined successfully");
+                    result.put("changes", describeChange(change));
                     return new CallToolResult(MAPPER.writeValueAsString(result), false);
                 }
+
+                Change change = inlineMethod.createChange(new NullProgressMonitor());
+                change.perform(new NullProgressMonitor());
+
+                result.put("status", "SUCCESS");
+                result.put("inlineType", "METHOD");
+                result.put("message", "Method inlined successfully");
+                return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
             result.put("status", "ERROR");
