@@ -98,6 +98,12 @@ class RenameRefactoring {
                 return new CallToolResult("Element not found: " + elementName + " (type: " + elementType + ")", true);
             }
 
+            McpLogger.info("RenameRefactoring", "Renaming " + elementType + " '" + elementName
+                    + "' -> '" + newName + "' (updateReferences=" + updateReferences
+                    + ", preview=" + previewOnly + ")");
+            McpLogger.info("RenameRefactoring", "Element: " + element.getClass().getSimpleName()
+                    + " in project " + (element.getJavaProject() != null ? element.getJavaProject().getElementName() : "null"));
+
             // Create rename processor directly (not via Descriptor API).
             // Direct processor usage gives full control in headless mode and avoids
             // the Descriptor abstraction layer which is optimized for UI workflows.
@@ -108,12 +114,19 @@ class RenameRefactoring {
                         "Unsupported element type for rename: " + element.getClass().getSimpleName(), true);
             }
 
+            McpLogger.info("RenameRefactoring", "Using processor: " + processor.getClass().getSimpleName());
+
             org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring refactoring =
                     new org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring(processor);
 
             // Step 1: checkInitialConditions — validates the element can be renamed
             NullProgressMonitor monitor = new NullProgressMonitor();
             RefactoringStatus checkStatus = refactoring.checkInitialConditions(monitor);
+            McpLogger.info("RenameRefactoring", "checkInitialConditions: severity="
+                    + checkStatus.getSeverity() + " entries=" + checkStatus.getEntries().length);
+            for (var entry : checkStatus.getEntries()) {
+                McpLogger.debug("RenameRefactoring", "  init: [" + entry.getSeverity() + "] " + entry.getMessage());
+            }
             List<String> initErrors = RefactoringSupport.getRealErrors(checkStatus);
             if (!initErrors.isEmpty()) {
                 return renameErrorResult(elementName, newName, elementType, updateReferences,
@@ -127,6 +140,11 @@ class RenameRefactoring {
             // fall back to AST-based rename which works reliably without Participants.
             try {
                 RefactoringStatus finalStatus = refactoring.checkFinalConditions(monitor);
+                McpLogger.info("RenameRefactoring", "checkFinalConditions: severity="
+                        + finalStatus.getSeverity() + " entries=" + finalStatus.getEntries().length);
+                for (var entry : finalStatus.getEntries()) {
+                    McpLogger.debug("RenameRefactoring", "  final: [" + entry.getSeverity() + "] " + entry.getMessage());
+                }
                 checkStatus.merge(finalStatus);
             } catch (IllegalArgumentException e) {
                 String errorMsg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -173,6 +191,10 @@ class RenameRefactoring {
             // Count leaf changes BEFORE perform (perform may clear children)
             int leafChangeCount = RefactoringSupport.countLeafChanges(change);
             Map<String, Object> changeDesc = RefactoringSupport.describeChange(change);
+
+            McpLogger.info("RenameRefactoring", "createChange produced " + leafChangeCount
+                    + " leaf changes, change type: " + (change != null ? change.getClass().getSimpleName() : "null"));
+            logChangeTree(change, 0);
 
             // If no changes were produced, fall back to AST-based rename
             if (leafChangeCount == 0) {
@@ -228,7 +250,13 @@ class RenameRefactoring {
             fieldProcessor.setUpdateTextualMatches(false);
             processor = fieldProcessor;
         } else if (element instanceof IMethod method) {
-            if (isVirtualMethod(method)) {
+            boolean virtual = isVirtualMethod(method);
+            McpLogger.info("RenameRefactoring", "Method '" + method.getElementName()
+                    + "' in " + method.getDeclaringType().getFullyQualifiedName()
+                    + ": isVirtual=" + virtual
+                    + ", isInterface=" + method.getDeclaringType().isInterface()
+                    + ", flags=0x" + Integer.toHexString(method.getFlags()));
+            if (virtual) {
                 var virtualProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameVirtualMethodProcessor(method);
                 virtualProcessor.setUpdateReferences(updateReferences);
                 processor = virtualProcessor;
@@ -473,6 +501,27 @@ class RenameRefactoring {
 
         cu.getBuffer().setContents(sb.toString());
         cu.save(monitor, true);
+    }
+
+    /**
+     * Logs the change tree recursively for debugging.
+     */
+    private static void logChangeTree(Change change, int depth) {
+        if (change == null) return;
+        String indent = "  ".repeat(depth);
+        String affected = "";
+        if (change.getModifiedElement() != null) {
+            affected = " [modifiedElement=" + change.getModifiedElement() + "]";
+        }
+        McpLogger.debug("RenameRefactoring", indent + change.getClass().getSimpleName()
+                + ": " + change.getName() + affected);
+        if (change instanceof org.eclipse.ltk.core.refactoring.CompositeChange composite) {
+            Change[] children = composite.getChildren();
+            McpLogger.debug("RenameRefactoring", indent + "  children: " + children.length);
+            for (Change child : children) {
+                logChangeTree(child, depth + 1);
+            }
+        }
     }
 
     /**
