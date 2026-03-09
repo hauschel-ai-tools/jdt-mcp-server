@@ -87,21 +87,17 @@ detect_lombok() {
 
     local lombok_detected=false
 
-    # Check pom.xml files recursively for Lombok dependency
-    if [ -f "pom.xml" ]; then
-        if grep -rq '<artifactId>lombok</artifactId>' pom.xml */pom.xml 2>/dev/null; then
-            lombok_detected=true
-        fi
+    # Check pom.xml files for Lombok dependency (up to 3 levels deep)
+    # Covers: root pom, submodules, and nested multi-module projects
+    if grep -rql '<artifactId>lombok</artifactId>' --include='pom.xml' . 2>/dev/null | head -1 | grep -q .; then
+        lombok_detected=true
     fi
 
-    # Check build.gradle files for Lombok
+    # Check build.gradle files for Lombok (up to 3 levels deep)
     if [ "$lombok_detected" = false ]; then
-        for gf in build.gradle build.gradle.kts */build.gradle */build.gradle.kts; do
-            if [ -f "$gf" ] && grep -q 'lombok' "$gf" 2>/dev/null; then
-                lombok_detected=true
-                break
-            fi
-        done
+        if grep -rql 'lombok' --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null | head -1 | grep -q .; then
+            lombok_detected=true
+        fi
     fi
 
     if [ "$lombok_detected" = false ]; then
