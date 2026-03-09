@@ -11,6 +11,7 @@ import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.IMethod;
+import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.ISourceRange;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.dom.AST;
@@ -56,16 +57,19 @@ class RenameRefactoring {
                 Map.of(
                         "elementName", Map.of(
                                 "type", "string",
-                                "description", "What to rename. CLASS: 'com.example.MyClass'. METHOD: 'com.example.MyClass#oldMethod'. FIELD: 'com.example.MyClass#oldField'"),
+                                "description", "What to rename. CLASS: 'com.example.MyClass'. METHOD: 'com.example.MyClass#oldMethod'. FIELD: 'com.example.MyClass#oldField'. PACKAGE: 'com.example.oldpackage'"),
                         "newName", Map.of(
                                 "type", "string",
-                                "description", "New simple name (e.g., 'NewClassName' or 'newMethodName' - without package)"),
+                                "description", "New name. For PACKAGE: fully qualified (e.g., 'com.example.newpackage'). For others: simple name (e.g., 'NewClassName')"),
                         "elementType", Map.of(
                                 "type", "string",
-                                "description", "What type of element: 'CLASS', 'METHOD', or 'FIELD'"),
+                                "description", "What type of element: 'CLASS', 'METHOD', 'FIELD', or 'PACKAGE'"),
                         "updateReferences", Map.of(
                                 "type", "boolean",
                                 "description", "Update all references to the renamed element (default: true)"),
+                        "renameSubpackages", Map.of(
+                                "type", "boolean",
+                                "description", "Only for PACKAGE: also rename sub-packages recursively (default: true). E.g., renaming 'com.old' also renames 'com.old.sub' to 'com.new.sub'"),
                         "preview", Map.of(
                                 "type", "boolean",
                                 "description", "If true, only preview changes without applying (default: false)")),
@@ -74,9 +78,10 @@ class RenameRefactoring {
 
         Tool tool = new Tool(
                 "jdt_rename_element",
-                "✏️ RENAME SAFELY: NEVER use find-replace for renaming! This tool renames a class/method/field AND updates ALL references everywhere. " +
+                "✏️ RENAME SAFELY: NEVER use find-replace for renaming! This tool renames a class/method/field/package AND updates ALL references everywhere. " +
                 "WHY USE THIS: Find-replace breaks code. This tool knows Java semantics - renames correctly even with same-named variables in different scopes. " +
                 "EXAMPLE: Rename 'userId' to 'customerId' → updates field, getters, setters, all usages in 50 files automatically. " +
+                "PACKAGE RENAME: Renames package, moves files, updates all imports. Use renameSubpackages=true (default) to include sub-packages. " +
                 "TIP: preview=true shows exactly what changes before applying.",
                 schema,
                 null);
@@ -86,11 +91,12 @@ class RenameRefactoring {
                 (String) args.get("newName"),
                 (String) args.get("elementType"),
                 args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
+                args.get("renameSubpackages") != null ? (Boolean) args.get("renameSubpackages") : true,
                 args.get("preview") != null ? (Boolean) args.get("preview") : false));
     }
 
     private static CallToolResult renameElement(String elementName, String newName, String elementType,
-            boolean updateReferences, boolean previewOnly) {
+            boolean updateReferences, boolean renameSubpackages, boolean previewOnly) {
         try {
             // Find the element
             IJavaElement element = RefactoringSupport.findElement(elementName, elementType);
@@ -108,7 +114,7 @@ class RenameRefactoring {
             // Direct processor usage gives full control in headless mode and avoids
             // the Descriptor abstraction layer which is optimized for UI workflows.
             org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor processor =
-                    createRenameProcessor(element, newName, updateReferences);
+                    createRenameProcessor(element, newName, updateReferences, renameSubpackages);
             if (processor == null) {
                 return new CallToolResult(
                         "Unsupported element type for rename: " + element.getClass().getSimpleName(), true);
@@ -152,8 +158,11 @@ class RenameRefactoring {
                 java.io.StringWriter sw = new java.io.StringWriter();
                 e.printStackTrace(new java.io.PrintWriter(sw));
                 McpLogger.warn("RenameRefactoring",
-                        "checkFinalConditions threw IAE, falling back to AST-based rename: " + errorMsg
+                        "checkFinalConditions threw IAE: " + errorMsg
                         + "\nStack trace:\n" + sw.toString());
+                if (element instanceof IPackageFragment) {
+                    return new CallToolResult("Package rename failed: " + errorMsg, true);
+                }
                 return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
@@ -196,12 +205,16 @@ class RenameRefactoring {
                     + " leaf changes, change type: " + (change != null ? change.getClass().getSimpleName() : "null"));
             logChangeTree(change, 0);
 
-            // If no changes were produced, fall back to AST-based rename
+            // If no changes were produced, fall back to AST-based rename (not for packages)
             if (leafChangeCount == 0) {
                 McpLogger.warn("RenameRefactoring",
                         "Processor produced empty change (leafChanges: 0)"
-                        + (updateReferences ? " with updateReferences=true" : "")
-                        + ", falling back to AST-based rename");
+                        + (updateReferences ? " with updateReferences=true" : ""));
+                if (element instanceof IPackageFragment) {
+                    return new CallToolResult(
+                            "Package rename produced no changes. The package may already have the target name.", true);
+                }
+                McpLogger.info("RenameRefactoring", "Falling back to AST-based rename");
                 return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
@@ -238,11 +251,19 @@ class RenameRefactoring {
      * Direct processor usage (instead of Descriptor API) gives full control in headless mode.
      */
     private static org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor
-            createRenameProcessor(IJavaElement element, String newName, boolean updateReferences)
+            createRenameProcessor(IJavaElement element, String newName, boolean updateReferences,
+                    boolean renameSubpackages)
             throws CoreException {
         org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor processor = null;
 
-        if (element instanceof IField field) {
+        if (element instanceof IPackageFragment pkg) {
+            var pkgProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenamePackageProcessor(pkg);
+            pkgProcessor.setUpdateReferences(updateReferences);
+            pkgProcessor.setRenameSubpackages(renameSubpackages);
+            pkgProcessor.setUpdateTextualMatches(false);
+            pkgProcessor.setUpdateQualifiedNames(false);
+            processor = pkgProcessor;
+        } else if (element instanceof IField field) {
             var fieldProcessor = new org.eclipse.jdt.internal.corext.refactoring.rename.RenameFieldProcessor(field);
             fieldProcessor.setRenameGetter(false);
             fieldProcessor.setRenameSetter(false);

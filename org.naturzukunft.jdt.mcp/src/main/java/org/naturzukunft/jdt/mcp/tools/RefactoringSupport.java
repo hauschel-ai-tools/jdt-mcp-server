@@ -9,6 +9,8 @@ import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IMethod;
+import org.eclipse.jdt.core.IPackageFragment;
+import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.ltk.core.refactoring.Change;
@@ -53,11 +55,33 @@ class RefactoringSupport {
     }
 
     /**
+     * Finds IPackageFragment by name across all source roots of all projects.
+     */
+    static IPackageFragment findPackageInSourceProject(String packageName) throws Exception {
+        for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
+                .getJavaProjects()) {
+            if (!project.getProject().isOpen()) continue;
+            for (IPackageFragmentRoot root : project.getPackageFragmentRoots()) {
+                if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                    IPackageFragment pkg = root.getPackageFragment(packageName);
+                    if (pkg != null && pkg.exists()) {
+                        return pkg;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Helper: Find a Java element by name and type.
      */
     static IJavaElement findElement(String elementName, String elementType) {
         try {
             switch (elementType.toUpperCase()) {
+                case "PACKAGE" -> {
+                    return findPackageInSourceProject(elementName);
+                }
                 case "CLASS", "INTERFACE", "ENUM", "TYPE" -> {
                     return findTypeInSourceProject(elementName);
                 }
