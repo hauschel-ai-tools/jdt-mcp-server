@@ -310,10 +310,13 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 
 ## Bekannte Einschränkungen
 
-| Einschränkung | Betroffenes Tool | Ursache |
-|---|---|---|
-| `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus |
-| `jdt_extract_interface` nutzt String-Manipulation statt ASTRewrite | `jdt_extract_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen |
+| Einschränkung | Betroffenes Tool | Ursache | Issue |
+|---|---|---|---|
+| Rename von Interface-Methoden mit Generics aktualisiert Implementierungen nicht | `jdt_rename_element` | JDT-Bug: `RenameVirtualMethodProcessor` kann im Headless-Modus `Processor<T>.process(T)` nicht zu `SimpleProcessor.process(String)` auflösen (Generics-Binding fehlt). Caller werden korrekt aktualisiert, Override-Methoden nicht. | [#29](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/29) |
+| Eclipse JUnit-Runner inkompatibel mit JUnit Platform 1.x | `jdt_run_tests`, `jdt_start_tests_async` | `NoClassDefFoundError: OutputDirectoryCreator` — Eclipse JDT JUnit5-Runner erwartet JUnit Platform 6.x. Workaround: `jdt_maven_build(goals="test")` | [#71](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/71) |
+| Unbenutzte package-private Felder werden nicht erkannt | `jdt_find_unused_code` | JDT erkennt nur unbenutzte private Members, nicht package-private | [#72](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/72) |
+| `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus | |
+| `jdt_extract_interface` nutzt String-Manipulation statt ASTRewrite | `jdt_extract_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen | [#52](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/52) |
 
 ## Entwicklung
 
