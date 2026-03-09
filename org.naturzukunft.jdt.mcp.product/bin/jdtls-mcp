@@ -16,10 +16,10 @@
 # Configuration file:
 #   ~/.jdt-mcp/jdt-mcp.ini - Additional JVM arguments (one per line, # for comments)
 #
-# Lombok auto-detection:
-#   If the project uses Lombok (detected via pom.xml/build.gradle), the launcher
-#   automatically adds -javaagent for the Lombok JAR from ~/.m2/repository.
-#   Set JDTMCP_NO_LOMBOK=1 to disable auto-detection.
+# Lombok support:
+#   If lombok.jar exists in ~/.m2/repository, it is always loaded as -javaagent.
+#   This is harmless for non-Lombok projects but essential for Lombok projects.
+#   Set JDTMCP_NO_LOMBOK=1 to disable.
 #
 
 set -euo pipefail
@@ -77,55 +77,29 @@ fi
 # Collect additional JVM arguments
 EXTRA_VMARGS=()
 
-# --- Lombok auto-detection ---
-# Searches pom.xml hierarchy and build.gradle for Lombok dependency,
-# then finds the JAR in ~/.m2/repository and adds -javaagent automatically.
-detect_lombok() {
+# --- Lombok agent ---
+# Always load Lombok if available in ~/.m2 — harmless for non-Lombok projects,
+# but essential for Lombok projects. Avoids fragile project-level detection.
+load_lombok() {
     if [ "${JDTMCP_NO_LOMBOK:-}" = "1" ]; then
         return
     fi
 
-    local lombok_detected=false
-
-    # Check pom.xml files for Lombok dependency (up to 3 levels deep)
-    # Covers: root pom, submodules, and nested multi-module projects
-    if grep -rql '<artifactId>lombok</artifactId>' --include='pom.xml' . 2>/dev/null | head -1 | grep -q .; then
-        lombok_detected=true
-    fi
-
-    # Check build.gradle files for Lombok (up to 3 levels deep)
-    if [ "$lombok_detected" = false ]; then
-        if grep -rql 'lombok' --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null | head -1 | grep -q .; then
-            lombok_detected=true
-        fi
-    fi
-
-    if [ "$lombok_detected" = false ]; then
-        return
-    fi
-
-    # Find the newest Lombok JAR in Maven local repository
     local lombok_dir="$HOME/.m2/repository/org/projectlombok/lombok"
     if [ ! -d "$lombok_dir" ]; then
-        echo "WARNING: Lombok dependency detected but not found in $lombok_dir" >&2
-        echo "WARNING: Run 'mvn dependency:resolve' to download Lombok, or set JDTMCP_NO_LOMBOK=1 to suppress" >&2
         return
     fi
 
-    # Find newest version directory (sort by version, take last)
     local lombok_jar
     lombok_jar=$(ls -t "$lombok_dir"/*/lombok-*.jar 2>/dev/null | head -1)
 
-    if [ -z "$lombok_jar" ]; then
-        echo "WARNING: Lombok directory exists but no JAR found in $lombok_dir" >&2
-        return
+    if [ -n "$lombok_jar" ]; then
+        echo "INFO: Loading Lombok agent: $lombok_jar" >&2
+        EXTRA_VMARGS+=("-javaagent:$lombok_jar")
     fi
-
-    echo "INFO: Lombok detected, adding -javaagent:$lombok_jar" >&2
-    EXTRA_VMARGS+=("-javaagent:$lombok_jar")
 }
 
-detect_lombok
+load_lombok
 
 # --- Read ~/.jdt-mcp/jdt-mcp.ini ---
 INI_FILE="$HOME/.jdt-mcp/jdt-mcp.ini"
