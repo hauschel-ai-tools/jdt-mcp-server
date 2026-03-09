@@ -122,6 +122,15 @@ public class HeadlessApplication implements IApplication {
         McpLogger.init();
         McpLogger.info("HeadlessApplication", "Starting JDT MCP Server (standalone)");
 
+        // Check if Lombok agent is loaded
+        checkLombokAgent();
+
+        // Initialize JDT preferences for headless mode.
+        // Without this, RenamePackageProcessor and other refactorings that use
+        // CodeStyleConfiguration.createImportRewrite() fail with IAE because
+        // JavaManipulation.getPreference() calls ProjectScope.getNode(null).
+        initHeadlessPreferences();
+
         // Start MCP server FIRST so clients can connect immediately
         Activator activator = Activator.getDefault();
         if (activator != null) {
@@ -187,6 +196,64 @@ public class HeadlessApplication implements IApplication {
 
         McpLogger.info("HeadlessApplication", "Shutting down");
         return IApplication.EXIT_OK;
+    }
+
+    /**
+     * Initializes JDT manipulation preferences for headless mode.
+     * In Eclipse UI, the JavaPlugin sets the preference node ID on startup.
+     * In headless mode, we must do this ourselves so that
+     * CodeStyleConfiguration/ImportRewrite can look up import order and thresholds.
+     */
+    private void initHeadlessPreferences() {
+        try {
+            // 1. Set the preference node ID (normally done by JavaPlugin in Eclipse UI)
+            String nodeId = org.eclipse.jdt.core.manipulation.JavaManipulation.getPreferenceNodeId();
+            if (nodeId == null) {
+                org.eclipse.jdt.core.manipulation.JavaManipulation.setPreferenceNodeId("org.eclipse.jdt.ui");
+                McpLogger.info("HeadlessApplication", "Set JavaManipulation preferenceNodeId to 'org.eclipse.jdt.ui'");
+            }
+
+            // 2. Set default import order and thresholds.
+            // Without these, CodeStyleConfiguration.configureImportRewrite() gets null
+            // from JavaManipulation.getPreference() and crashes with NPE on order.endsWith().
+            org.eclipse.core.runtime.preferences.IEclipsePreferences prefs =
+                    org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE.getNode("org.eclipse.jdt.ui");
+            if (prefs.get("org.eclipse.jdt.ui.importorder", null) == null) {
+                prefs.put("org.eclipse.jdt.ui.importorder", "java;javax;org;com");
+                prefs.put("org.eclipse.jdt.ui.ondemandthreshold", "99");
+                prefs.put("org.eclipse.jdt.ui.staticondemandthreshold", "99");
+                prefs.flush();
+                McpLogger.info("HeadlessApplication", "Set default import order preferences for headless mode");
+            }
+        } catch (Exception e) {
+            McpLogger.warn("HeadlessApplication", "Failed to initialize headless preferences: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Checks if the Lombok agent is loaded in the current JVM.
+     * Lombok patches the Eclipse compiler at the bytecode level via a javaagent,
+     * which is required for JDT to see Lombok-generated methods, fields, and constructors.
+     */
+    private void checkLombokAgent() {
+        if (isLombokAgentLoaded()) {
+            McpLogger.info("HeadlessApplication", "Lombok agent detected — Lombok projects will be fully supported");
+        } else {
+            McpLogger.info("HeadlessApplication", "Lombok agent not loaded (this is fine unless your projects use Lombok)");
+        }
+    }
+
+    /**
+     * Returns true if the Lombok agent is active in this JVM.
+     */
+    static boolean isLombokAgentLoaded() {
+        try {
+            // Lombok agent sets up its own class transformer. If the class exists, the agent is loaded.
+            Class.forName("lombok.launch.Agent");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
     }
 
     @Override

@@ -250,6 +250,9 @@ public class ProjectImporter {
             // Add Maven dependencies from local repository
             addMavenDependencies(moduleDir, entries);
 
+            // Warn if Lombok is in dependencies but agent is not loaded
+            checkLombokInClasspath(entries, projectName);
+
             javaProject.setRawClasspath(entries.toArray(new IClasspathEntry[0]), monitor);
 
             // Set output location
@@ -813,6 +816,35 @@ public class ProjectImporter {
         } catch (Exception e) {
             McpLogger.warn("ProjectImporter",
                     "Could not resolve Gradle dependencies for " + projectDir.getFileName() + ": " + e.getMessage());
+        }
+    }
+
+    private static volatile boolean lombokWarningShown = false;
+
+    /**
+     * Checks if any classpath entry is a Lombok JAR and warns if the Lombok agent is not loaded.
+     * Without the agent, JDT cannot see Lombok-generated members (getters, constructors, loggers, etc.),
+     * causing phantom compile errors and refactoring failures.
+     */
+    private static void checkLombokInClasspath(List<IClasspathEntry> entries, String projectName) {
+        if (lombokWarningShown) {
+            return;
+        }
+        for (IClasspathEntry entry : entries) {
+            if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                String jarName = entry.getPath().lastSegment();
+                if (jarName != null && jarName.startsWith("lombok-") && jarName.endsWith(".jar")) {
+                    if (!HeadlessApplication.isLombokAgentLoaded()) {
+                        lombokWarningShown = true;
+                        McpLogger.warn("ProjectImporter",
+                                "Lombok dependency detected in '" + projectName + "' but Lombok agent is NOT loaded. " +
+                                "This will cause phantom compile errors (unresolved getters, constructors, loggers). " +
+                                "To fix: restart jdtls-mcp (auto-detection should add -javaagent), " +
+                                "or add '-javaagent:<path>/lombok.jar' to ~/.jdt-mcp/jdt-mcp.ini");
+                    }
+                    return;
+                }
+            }
         }
     }
 }

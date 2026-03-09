@@ -10,7 +10,16 @@
 # Environment variables:
 #   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: ~/.jdt-mcp/workspaces/<hash-of-cwd>)
 #   JDTMCP_TRANSPORT  - Transport: stdio or http (default: stdio)
+#   JDTMCP_VMARGS     - Additional JVM arguments (space-separated)
 #   JAVA_HOME         - Java installation to use
+#
+# Configuration file:
+#   ~/.jdt-mcp/jdt-mcp.ini - Additional JVM arguments (one per line, # for comments)
+#
+# Lombok auto-detection:
+#   If the project uses Lombok (detected via pom.xml/build.gradle), the launcher
+#   automatically adds -javaagent for the Lombok JAR from ~/.m2/repository.
+#   Set JDTMCP_NO_LOMBOK=1 to disable auto-detection.
 #
 
 set -euo pipefail
@@ -65,11 +74,88 @@ if [ -z "$LAUNCHER" ]; then
     exit 1
 fi
 
+# Collect additional JVM arguments
+EXTRA_VMARGS=()
+
+# --- Lombok auto-detection ---
+# Searches pom.xml hierarchy and build.gradle for Lombok dependency,
+# then finds the JAR in ~/.m2/repository and adds -javaagent automatically.
+detect_lombok() {
+    if [ "${JDTMCP_NO_LOMBOK:-}" = "1" ]; then
+        return
+    fi
+
+    local lombok_detected=false
+
+    # Check pom.xml files recursively for Lombok dependency
+    if [ -f "pom.xml" ]; then
+        if grep -rq '<artifactId>lombok</artifactId>' pom.xml */pom.xml 2>/dev/null; then
+            lombok_detected=true
+        fi
+    fi
+
+    # Check build.gradle files for Lombok
+    if [ "$lombok_detected" = false ]; then
+        for gf in build.gradle build.gradle.kts */build.gradle */build.gradle.kts; do
+            if [ -f "$gf" ] && grep -q 'lombok' "$gf" 2>/dev/null; then
+                lombok_detected=true
+                break
+            fi
+        done
+    fi
+
+    if [ "$lombok_detected" = false ]; then
+        return
+    fi
+
+    # Find the newest Lombok JAR in Maven local repository
+    local lombok_dir="$HOME/.m2/repository/org/projectlombok/lombok"
+    if [ ! -d "$lombok_dir" ]; then
+        echo "WARNING: Lombok dependency detected but not found in $lombok_dir" >&2
+        echo "WARNING: Run 'mvn dependency:resolve' to download Lombok, or set JDTMCP_NO_LOMBOK=1 to suppress" >&2
+        return
+    fi
+
+    # Find newest version directory (sort by version, take last)
+    local lombok_jar
+    lombok_jar=$(ls -t "$lombok_dir"/*/lombok-*.jar 2>/dev/null | head -1)
+
+    if [ -z "$lombok_jar" ]; then
+        echo "WARNING: Lombok directory exists but no JAR found in $lombok_dir" >&2
+        return
+    fi
+
+    echo "INFO: Lombok detected, adding -javaagent:$lombok_jar" >&2
+    EXTRA_VMARGS+=("-javaagent:$lombok_jar")
+}
+
+detect_lombok
+
+# --- Read ~/.jdt-mcp/jdt-mcp.ini ---
+INI_FILE="$HOME/.jdt-mcp/jdt-mcp.ini"
+if [ -f "$INI_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines and comments
+        line="${line%%#*}"
+        line="$(echo "$line" | xargs)" # trim whitespace
+        if [ -n "$line" ]; then
+            EXTRA_VMARGS+=("$line")
+        fi
+    done < "$INI_FILE"
+fi
+
+# --- Read JDTMCP_VMARGS environment variable ---
+if [ -n "${JDTMCP_VMARGS:-}" ]; then
+    # shellcheck disable=SC2206
+    EXTRA_VMARGS+=($JDTMCP_VMARGS)
+fi
+
 exec "$JAVA" \
     -Djdtmcp.headless=true \
     -Djdtmcp.transport="$TRANSPORT" \
     -Dosgi.bundles.defaultStartLevel=4 \
     -Declipse.application=org.naturzukunft.jdt.mcp.headless \
+    "${EXTRA_VMARGS[@]+"${EXTRA_VMARGS[@]}"}" \
     -jar "$LAUNCHER" \
     -configuration "$BASEDIR/configuration" \
     -data "$WORKSPACE" \
