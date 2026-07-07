@@ -134,7 +134,11 @@ public class HeadlessApplication implements IApplication {
         // Start MCP server FIRST so clients can connect immediately
         Activator activator = Activator.getDefault();
         if (activator != null) {
-            activator.startMcpServer();
+            try {
+                activator.startMcpServer();
+            } catch (Throwable t) {
+                McpLogger.error("HeadlessApplication", "Failed to start MCP server", t);
+            }
         }
 
         // Import projects from working directory in background

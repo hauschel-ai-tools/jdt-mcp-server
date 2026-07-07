@@ -68,8 +68,8 @@ public class McpServerManager {
             running = true;
             McpLogger.info("ServerManager", "Server started (" + transport + ") with " + tools.length + " tools");
 
-        } catch (Exception e) {
-            McpLogger.error("ServerManager", "Failed to start server", e);
+        } catch (Throwable t) {
+            McpLogger.error("ServerManager", "Failed to start server", t);
             running = false;
         }
     }
