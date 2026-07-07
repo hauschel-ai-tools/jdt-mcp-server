@@ -11,6 +11,7 @@ import org.eclipse.core.runtime.Path;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
@@ -19,13 +20,13 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
-import org.eclipse.jdt.core.refactoring.IJavaRefactorings;
-import org.eclipse.jdt.core.refactoring.descriptors.MoveDescriptor;
+import org.eclipse.jdt.internal.corext.refactoring.reorg.JavaMoveProcessor;
+import org.eclipse.jdt.internal.corext.refactoring.reorg.ReorgDestinationFactory;
+import org.eclipse.jdt.internal.corext.refactoring.reorg.ReorgPolicyFactory;
+import org.eclipse.jdt.internal.corext.refactoring.reorg.IReorgPolicy;
 import org.eclipse.ltk.core.refactoring.Change;
-import org.eclipse.ltk.core.refactoring.Refactoring;
-import org.eclipse.ltk.core.refactoring.RefactoringContribution;
-import org.eclipse.ltk.core.refactoring.RefactoringCore;
 import org.eclipse.ltk.core.refactoring.RefactoringStatus;
+import org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring;
 import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
@@ -90,7 +91,8 @@ public class RefactoringTools {
                 "USE CASE: Method too long? Duplicated logic? Extract it! Clean Code principle: methods should do ONE thing. " +
                 "HOW TO GET OFFSETS: jdt_parse_java_file returns sourceOffset for methods - select a range within. " +
                 "IMPORTANT: Offsets must align with complete statement boundaries (e.g., start of a statement, end at semicolon). " +
-                "Partial expressions or mid-statement selections will fail.",
+                "Partial expressions or mid-statement selections will fail. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -168,7 +170,7 @@ public class RefactoringTools {
 
             // Execute the refactoring
             Change change = extractRefactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
+            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Extract method completed successfully");
@@ -194,6 +196,11 @@ public class RefactoringTools {
                         "targetPackage", Map.of(
                                 "type", "string",
                                 "description", "Destination package (e.g., 'com.example.common'). Will be created if it doesn't exist."),
+                        "targetProject", Map.of(
+                                "type", "string",
+                                "description", "Target project name for cross-module moves (e.g., 'cg-shared-kernel'). "
+                                        + "Required when targetPackage doesn't exist yet in any project. "
+                                        + "Use jdt_list_projects to find available projects."),
                         "updateReferences", Map.of(
                                 "type", "boolean",
                                 "description", "Update all references to the moved type (default: true)"),
@@ -206,19 +213,23 @@ public class RefactoringTools {
         Tool tool = new Tool(
                 "jdt_move_type",
                 "Move a class/interface/enum to a different package. Updates all imports and references across the workspace. " +
-                "Use preview=true first to see impact.",
+                "Use preview=true first to see impact. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> moveType(
                 (String) args.get("typeName"),
                 (String) args.get("targetPackage"),
+                (String) args.get("targetProject"),
                 args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                args.get("preview") != null ? (Boolean) args.get("preview") : false,
+                progress));
     }
 
     private static CallToolResult moveType(String typeName, String targetPackage,
-            boolean updateReferences, boolean previewOnly) {
+            String targetProject, boolean updateReferences, boolean previewOnly,
+            org.naturzukunft.jdt.mcp.server.ProgressReporter progress) {
         try {
             // Find the type in its source project
             IType type = RefactoringSupport.findTypeInSourceProject(typeName);
@@ -227,74 +238,148 @@ public class RefactoringTools {
                 return new CallToolResult("Type not found: " + typeName, true);
             }
 
-            // Find or create target package
-            IPackageFragmentRoot sourceRoot = (IPackageFragmentRoot) type.getPackageFragment().getParent();
-            IPackageFragment targetPkg = sourceRoot.getPackageFragment(targetPackage);
+            // Find or create target package.
+            IPackageFragment targetPkg = null;
 
-            if (targetPkg == null || !targetPkg.exists()) {
-                // Create the package
-                targetPkg = sourceRoot.createPackageFragment(targetPackage, true, new NullProgressMonitor());
+            if (targetProject != null && !targetProject.isBlank()) {
+                // Explicit target project specified — find/create package there
+                IJavaProject javaProject = JavaCore.create(
+                        ResourcesPlugin.getWorkspace().getRoot().getProject(targetProject));
+                if (javaProject == null || !javaProject.exists()) {
+                    return new CallToolResult("Target project not found: " + targetProject
+                            + ". Use jdt_list_projects to see available projects.", true);
+                }
+                for (IPackageFragmentRoot root : javaProject.getPackageFragmentRoots()) {
+                    if (root.getKind() == IPackageFragmentRoot.K_SOURCE) {
+                        targetPkg = root.getPackageFragment(targetPackage);
+                        if (targetPkg != null) {
+                            if (!targetPkg.exists()) {
+                                targetPkg = root.createPackageFragment(targetPackage, true, new NullProgressMonitor());
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (targetPkg == null) {
+                    return new CallToolResult("No source root found in project: " + targetProject, true);
+                }
+            } else {
+                // Search across all projects
+                targetPkg = RefactoringSupport.findPackageInSourceProject(targetPackage);
+                if (targetPkg == null || !targetPkg.exists()) {
+                    // Package not found in any project — for cross-module moves,
+                    // the user must specify targetProject explicitly.
+                    return new CallToolResult(
+                            "Target package '" + targetPackage + "' not found in any project. "
+                            + "For cross-module moves, specify 'targetProject' (e.g., the module where "
+                            + "the package should be created). Use jdt_list_projects to see available projects.",
+                            true);
+                }
             }
 
-            // Get the refactoring contribution for move
-            RefactoringContribution contribution = RefactoringCore.getRefactoringContribution(IJavaRefactorings.MOVE);
-            if (contribution == null) {
-                return new CallToolResult("Move refactoring not available", true);
+            // Use direct Processor API (not Descriptor API) for full workspace scope control.
+            // The Descriptor API lets the internal processor auto-determine search scope,
+            // which misses references in projects that have JAR-based (not project-based)
+            // classpath entries to the moved type's project.
+            IReorgPolicy.IMovePolicy movePolicy = ReorgPolicyFactory.createMovePolicy(
+                    new org.eclipse.core.resources.IResource[0],
+                    new IJavaElement[] { type.getCompilationUnit() });
+
+            if (!movePolicy.canEnable()) {
+                return new CallToolResult("Move refactoring not available for: " + typeName, true);
             }
 
-            MoveDescriptor descriptor = (MoveDescriptor) contribution.createDescriptor();
-            descriptor.setMoveResources(new org.eclipse.core.resources.IFile[0], new org.eclipse.core.resources.IFolder[0],
-                    new ICompilationUnit[] { type.getCompilationUnit() });
-            descriptor.setDestination(targetPkg);
-            descriptor.setUpdateReferences(updateReferences);
-            descriptor.setUpdateQualifiedNames(true);
+            JavaMoveProcessor processor = new JavaMoveProcessor(movePolicy);
+            processor.setReorgQueries(new org.eclipse.jdt.internal.corext.refactoring.reorg.NullReorgQueries());
+            processor.setCreateTargetQueries(() -> null);
 
-            // Create the refactoring
-            RefactoringStatus status = new RefactoringStatus();
-            Refactoring refactoring = descriptor.createRefactoring(status);
-
-            if (refactoring == null) {
-                return new CallToolResult("Could not create move refactoring: " + status.toString(), true);
+            // Set destination
+            RefactoringStatus destStatus = processor.setDestination(
+                    ReorgDestinationFactory.createDestination(targetPkg));
+            if (destStatus.hasFatalError()) {
+                return new CallToolResult("Invalid destination: " + destStatus.toString(), true);
             }
 
-            // Check preconditions
-            RefactoringStatus checkStatus = refactoring.checkAllConditions(new NullProgressMonitor());
+            processor.setUpdateReferences(updateReferences);
+            processor.setUpdateQualifiedNames(true);
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("typeName", typeName);
-            result.put("targetPackage", targetPackage);
-            result.put("updateReferences", updateReferences);
+            ProcessorBasedRefactoring refactoring = new ProcessorBasedRefactoring(processor);
+            NullProgressMonitor monitor = new NullProgressMonitor();
 
-            List<String> moveErrors = RefactoringSupport.getRealErrors(checkStatus);
-            if (!moveErrors.isEmpty()) {
-                result.put("status", "ERROR");
-                result.put("message", "Move refactoring has errors: " + String.join("; ", moveErrors));
-                result.put("errors", moveErrors);
-                return new CallToolResult(MAPPER.writeValueAsString(result), true);
-            }
+            // Heartbeat keeps the MCP connection alive during long-running refactorings.
+            // Claude Code has a 60s timeout — without periodic progress notifications,
+            // large moves (84+ files) cause "Connection closed".
+            java.util.concurrent.atomic.AtomicReference<String> phase =
+                    new java.util.concurrent.atomic.AtomicReference<>("Initializing");
+            java.util.concurrent.ScheduledExecutorService heartbeat =
+                    java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                        Thread t = new Thread(r, "move-type-heartbeat");
+                        t.setDaemon(true);
+                        return t;
+                    });
+            java.util.concurrent.atomic.AtomicInteger heartbeatCount = new java.util.concurrent.atomic.AtomicInteger(0);
+            heartbeat.scheduleAtFixedRate(() -> {
+                int count = heartbeatCount.incrementAndGet();
+                progress.report(count, -1, "Move " + typeName + ": " + phase.get() + " (" + (count * 10) + "s)");
+            }, 10, 10, java.util.concurrent.TimeUnit.SECONDS);
 
-            List<String> moveWarnings = RefactoringSupport.getNonParticipantWarnings(checkStatus);
-            if (!moveWarnings.isEmpty()) {
-                result.put("warnings", moveWarnings);
-            }
+            try {
+                // Check preconditions
+                phase.set("checking initial conditions");
+                RefactoringStatus checkStatus = refactoring.checkInitialConditions(monitor);
+                if (!RefactoringSupport.getRealErrors(checkStatus).isEmpty()) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("typeName", typeName);
+                    result.put("status", "ERROR");
+                    result.put("errors", RefactoringSupport.getRealErrors(checkStatus));
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
 
-            if (previewOnly) {
-                Change change = refactoring.createChange(new NullProgressMonitor());
-                result.put("status", "PREVIEW");
-                result.put("message", "Preview of move refactoring");
-                result.put("changes", RefactoringSupport.describeChange(change));
+                phase.set("searching references across workspace");
+                RefactoringStatus finalStatus = refactoring.checkFinalConditions(monitor);
+                checkStatus.merge(finalStatus);
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("typeName", typeName);
+                result.put("targetPackage", targetPackage);
+                result.put("updateReferences", updateReferences);
+
+                List<String> moveErrors = RefactoringSupport.getRealErrors(checkStatus);
+                if (!moveErrors.isEmpty()) {
+                    result.put("status", "ERROR");
+                    result.put("message", "Move refactoring has errors: " + String.join("; ", moveErrors));
+                    result.put("errors", moveErrors);
+                    return new CallToolResult(MAPPER.writeValueAsString(result), true);
+                }
+
+                List<String> moveWarnings = RefactoringSupport.getNonParticipantWarnings(checkStatus);
+                if (!moveWarnings.isEmpty()) {
+                    result.put("warnings", moveWarnings);
+                }
+
+                if (previewOnly) {
+                    phase.set("generating preview");
+                    Change change = refactoring.createChange(monitor);
+                    result.put("status", "PREVIEW");
+                    result.put("message", "Preview of move refactoring");
+                    result.put("changes", RefactoringSupport.describeChange(change));
+                    return new CallToolResult(MAPPER.writeValueAsString(result), false);
+                }
+
+                // Execute the refactoring
+                phase.set("creating changes");
+                Change change = refactoring.createChange(monitor);
+                phase.set("applying changes to " + RefactoringSupport.countLeafChanges(change) + " files");
+                RefactoringSupport.performChange(change, monitor);
+
+                result.put("status", "SUCCESS");
+                result.put("message", "Move completed successfully");
+                result.put("newLocation", targetPackage + "." + type.getElementName());
+
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
+            } finally {
+                heartbeat.shutdownNow();
             }
-
-            // Execute the refactoring
-            Change change = refactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
-
-            result.put("status", "SUCCESS");
-            result.put("message", "Move completed successfully");
-            result.put("newLocation", targetPackage + "." + type.getElementName());
-
-            return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
         } catch (Exception e) {
             return ToolErrors.errorResult("move type", e);
@@ -333,7 +418,8 @@ public class RefactoringTools {
         Tool tool = new Tool(
                 "jdt_inline",
                 "Inline a local variable or method. Replaces all references with the actual value/body. " +
-                "Opposite of extract refactoring. Use on a variable/method name position.",
+                "Opposite of extract refactoring. Use on a variable/method name position. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -386,7 +472,7 @@ public class RefactoringTools {
                     }
 
                     Change change = inlineTemp.createChange(new NullProgressMonitor());
-                    change.perform(new NullProgressMonitor());
+                    RefactoringSupport.performChange(change, new NullProgressMonitor());
 
                     result.put("status", "SUCCESS");
                     result.put("inlineType", "LOCAL_VARIABLE");
@@ -433,7 +519,7 @@ public class RefactoringTools {
                             }
 
                             Change change = inlineMethod.createChange(new NullProgressMonitor());
-                            change.perform(new NullProgressMonitor());
+                            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
                             result.put("status", "SUCCESS");
                             result.put("inlineType", "METHOD");
@@ -503,7 +589,8 @@ public class RefactoringTools {
         Tool tool = new Tool(
                 "jdt_change_method_signature",
                 "Change a method's signature: rename, change return type, add/remove parameters. " +
-                "All callers are automatically updated. Use preview=true first!",
+                "All callers are automatically updated. Use preview=true first! " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -605,7 +692,7 @@ public class RefactoringTools {
             }
 
             Change change = refactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
+            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Method signature changed successfully");
@@ -652,7 +739,8 @@ public class RefactoringTools {
         Tool tool = new Tool(
                 "jdt_encapsulate_field",
                 "Encapsulate a field: make it private and generate getter/setter methods. " +
-                "Updates all direct field accesses to use the accessors. Best practice for data hiding.",
+                "Updates all direct field accesses to use the accessors. Best practice for data hiding. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -720,7 +808,7 @@ public class RefactoringTools {
             }
 
             Change change = refactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
+            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Field encapsulated successfully");
@@ -762,7 +850,8 @@ public class RefactoringTools {
                 "Turn a local variable or expression into a METHOD PARAMETER. " +
                 "Example: Inside 'void greet() { String name = \"World\"; }' you can extract 'name' " +
                 "to become 'void greet(String name)'. All callers will be updated! " +
-                "Use when you want to make a method more flexible/reusable.",
+                "Use when you want to make a method more flexible/reusable. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -835,7 +924,7 @@ public class RefactoringTools {
             }
 
             Change change = refactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
+            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Parameter introduced successfully");

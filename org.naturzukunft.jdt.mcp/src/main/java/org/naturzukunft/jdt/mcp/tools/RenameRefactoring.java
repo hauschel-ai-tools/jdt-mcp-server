@@ -82,7 +82,8 @@ class RenameRefactoring {
                 "WHY USE THIS: Find-replace breaks code. This tool knows Java semantics - renames correctly even with same-named variables in different scopes. " +
                 "EXAMPLE: Rename 'userId' to 'customerId' → updates field, getters, setters, all usages in 50 files automatically. " +
                 "PACKAGE RENAME: Renames package, moves files, updates all imports. Use renameSubpackages=true (default) to include sub-packages. " +
-                "TIP: preview=true shows exactly what changes before applying.",
+                "TIP: preview=true shows exactly what changes before applying. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel — they modify shared workspace state. Call them one at a time.",
                 schema,
                 null);
 
@@ -218,7 +219,7 @@ class RenameRefactoring {
                 return renameViaAst(element, newName, updateReferences, previewOnly);
             }
 
-            change.perform(monitor);
+            RefactoringSupport.performChange(change, monitor);
             result.put("changes", changeDesc);
 
             // leafChangeCount == 1 means only the declaration was renamed, no references

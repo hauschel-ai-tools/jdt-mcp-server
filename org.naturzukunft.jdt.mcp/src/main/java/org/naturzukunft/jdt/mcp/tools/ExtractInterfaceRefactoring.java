@@ -58,7 +58,8 @@ class ExtractInterfaceRefactoring {
         Tool tool = new Tool(
                 "jdt_extract_interface",
                 "Extract an interface from a class. Select which methods to include. " +
-                "The class will implement the new interface. Great for introducing abstraction.",
+                "The class will implement the new interface. Great for introducing abstraction. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 
@@ -130,7 +131,7 @@ class ExtractInterfaceRefactoring {
             }
 
             Change change = refactoring.createChange(new NullProgressMonitor());
-            change.perform(new NullProgressMonitor());
+            RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
             result.put("message", "Interface extracted successfully");
