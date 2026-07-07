@@ -1,6 +1,8 @@
 {
-  "jdt-mcp": {
-    "command": "jdtls-mcp",
-    "args": []
+  "mcpServers": {
+    "jdt-mcp": {
+      "command": "jdtls-mcp",
+      "args": []
+    }
   }
 }
