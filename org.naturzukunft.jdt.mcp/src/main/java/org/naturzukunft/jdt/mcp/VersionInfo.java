@@ -27,8 +27,21 @@ public final class VersionInfo {
     }
 
     private static String readVersionFile() {
-        // The .version file is placed in the product root by the build.
-        // At runtime, eclipse.home.location points to the installation directory.
+        // Try OSGi bundle version first — Tycho generates a timestamp qualifier
+        // (e.g. "1.0.0.202604100719") that changes with every build.
+        try {
+            var bundle = org.osgi.framework.FrameworkUtil.getBundle(VersionInfo.class);
+            if (bundle != null) {
+                var version = bundle.getVersion();
+                if (version != null && !org.osgi.framework.Version.emptyVersion.equals(version)) {
+                    return version.toString();
+                }
+            }
+        } catch (Exception e) {
+            // OSGi not available — fall through
+        }
+
+        // Fallback: .version file in product root
         String eclipseHome = System.getProperty("eclipse.home.location");
         if (eclipseHome != null) {
             Path versionFile = toPath(eclipseHome);
@@ -40,7 +53,6 @@ public final class VersionInfo {
             }
         }
 
-        // Fallback: check osgi.install.area
         String installArea = System.getProperty("osgi.install.area");
         if (installArea != null) {
             Path versionFile = toPath(installArea);
