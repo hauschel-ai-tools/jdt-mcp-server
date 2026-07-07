@@ -540,6 +540,15 @@ public class ProjectInfoTools {
                     newClasspath.toArray(new IClasspathEntry[0]),
                     new NullProgressMonitor());
 
+            // Re-wire inter-project dependencies (new Maven deps may point to workspace projects)
+            List<IProject> allProjects = new ArrayList<>();
+            for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+                if (p.isOpen()) {
+                    allProjects.add(p);
+                }
+            }
+            ProjectImporter.setupInterProjectDependencies(allProjects, new NullProgressMonitor());
+
             // Refresh to pick up any file changes
             project.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
 

@@ -398,7 +398,7 @@ public class ProjectImporter {
      * For each project, parses its pom.xml to find dependencies on other workspace projects,
      * then adds project entries to the classpath (replacing any matching JAR entries).
      */
-    static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
+    public static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
         // Build a map of artifactId -> IProject for all workspace projects
         Map<String, IProject> artifactToProject = new HashMap<>();
         for (IProject project : projects) {
