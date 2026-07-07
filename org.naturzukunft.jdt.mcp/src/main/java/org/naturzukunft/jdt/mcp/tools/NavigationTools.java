@@ -65,6 +65,29 @@ public class NavigationTools {
 
     private static CallToolResult findType(String pattern) {
         try {
+            if (pattern == null || pattern.isBlank()) {
+                return new CallToolResult(
+                        "Missing required parameter 'pattern' (string). "
+                                + "Example: jdt_find_type({\"pattern\": \"*Service\"}). "
+                                + "Note: this tool does NOT accept 'typeName' or 'projectName' — "
+                                + "it searches the whole workspace by name pattern (wildcards '*' and '?' allowed).",
+                        true);
+            }
+            // Check if the search index is ready by attempting a quick probe.
+            // The JDT search index is built asynchronously after workspace build
+            // and may not be available immediately, especially for large projects.
+            if (!isSearchIndexReady()) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("pattern", pattern);
+                result.put("matchCount", 0);
+                result.put("matches", List.of());
+                result.put("status", "INDEX_NOT_READY");
+                result.put("message", "The JDT search index is still being built. "
+                        + "Please retry in 10-15 seconds. "
+                        + "Alternative: use jdt_parse_java_file if you know the file path.");
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
+            }
+
             List<Map<String, Object>> matches = new ArrayList<>();
 
             SearchEngine engine = new SearchEngine();
@@ -122,6 +145,47 @@ public class NavigationTools {
     }
 
     /**
+     * Checks if the JDT search index is ready by probing for a well-known type.
+     * The search index is built asynchronously after workspace build and may not
+     * be available immediately for large multi-module projects.
+     */
+    private static boolean isSearchIndexReady() {
+        try {
+            // Probe: search for "Object" which must exist in any Java project.
+            // If this returns nothing, the index is not ready yet.
+            IJavaProject[] projects = JavaCore.create(
+                    ResourcesPlugin.getWorkspace().getRoot()).getJavaProjects();
+            if (projects.length == 0) {
+                return true; // No projects imported yet — let the search run (will return empty)
+            }
+
+            boolean[] found = { false };
+            SearchEngine engine = new SearchEngine();
+            engine.searchAllTypeNames(
+                    "java.lang".toCharArray(),
+                    SearchPattern.R_EXACT_MATCH,
+                    "Object".toCharArray(),
+                    SearchPattern.R_EXACT_MATCH,
+                    IJavaSearchConstants.CLASS,
+                    SearchEngine.createWorkspaceScope(),
+                    new TypeNameMatchRequestor() {
+                        @Override
+                        public void acceptTypeNameMatch(TypeNameMatch match) {
+                            found[0] = true;
+                        }
+                    },
+                    IJavaSearchConstants.FORCE_IMMEDIATE_SEARCH,
+                    new NullProgressMonitor());
+
+            return found[0];
+        } catch (Exception e) {
+            org.naturzukunft.jdt.mcp.McpLogger.warn("NavigationTools",
+                    "Search index readiness probe failed: " + e.getMessage());
+            return true; // On error, let the actual search proceed
+        }
+    }
+
+    /**
      * Tool: Get detailed method signature information.
      */
     public static ToolRegistration getMethodSignatureTool() {
@@ -153,6 +217,13 @@ public class NavigationTools {
 
     private static CallToolResult getMethodSignature(String className, String methodName) {
         try {
+            if (className == null || className.isBlank() || methodName == null || methodName.isBlank()) {
+                return new CallToolResult(
+                        "Missing required parameters. Expected: {\"className\": \"com.example.UserService\", "
+                                + "\"methodName\": \"findById\"} (use methodName=\"*\" to list all methods). "
+                                + "Got className=" + className + ", methodName=" + methodName,
+                        true);
+            }
             IType type = findTypeByName(className);
             if (type == null) {
                 return new CallToolResult("Type not found: " + className, true);
@@ -235,6 +306,12 @@ public class NavigationTools {
 
     private static CallToolResult findImplementations(String typeName) {
         try {
+            if (typeName == null || typeName.isBlank()) {
+                return new CallToolResult(
+                        "Missing required parameter 'typeName' (fully qualified, e.g. "
+                                + "'com.example.UserRepository').",
+                        true);
+            }
             IType type = findTypeByName(typeName);
             if (type == null) {
                 return new CallToolResult("Type not found: " + typeName, true);
@@ -323,6 +400,13 @@ public class NavigationTools {
 
     private static CallToolResult findCallers(String className, String methodName) {
         try {
+            if (className == null || className.isBlank() || methodName == null || methodName.isBlank()) {
+                return new CallToolResult(
+                        "Missing required parameters. Expected: {\"className\": \"com.example.UserService\", "
+                                + "\"methodName\": \"findById\"}. "
+                                + "Got className=" + className + ", methodName=" + methodName,
+                        true);
+            }
             IType type = findTypeByName(className);
             if (type == null) {
                 return new CallToolResult("Type not found: " + className, true);

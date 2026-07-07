@@ -246,6 +246,15 @@ public class CodeAnalysisTools {
 
     private static CallToolResult findReferences(String elementName, String elementType) {
         try {
+            if (elementName == null || elementName.isBlank() || elementType == null || elementType.isBlank()) {
+                return new CallToolResult(
+                        "Missing required parameters. Expected: "
+                                + "{\"elementName\": \"com.example.MyClass\" | \"com.example.MyClass#method\" | \"com.example.MyClass#field\", "
+                                + "\"elementType\": \"CLASS\" | \"METHOD\" | \"FIELD\"}. "
+                                + "Note: this tool does NOT accept 'fullyQualifiedClassName', 'memberName' or 'projectName'. "
+                                + "Got elementName=" + elementName + ", elementType=" + elementType,
+                        true);
+            }
             // Resolve element via Java model for reliable cross-module search
             IJavaElement element = resolveElement(elementName, elementType);
             if (element == null) {
