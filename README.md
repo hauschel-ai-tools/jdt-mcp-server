@@ -338,3 +338,8 @@ Ohne Argument wird `jdtls-mcp` aus dem PATH verwendet.
 
 Beiträge sind willkommen! Bitte erstelle einen Issue oder Pull Request:
 https://git.changinggraph.org/ai-tools/jdt-mcp-server
+
+## Built by
+
+Fred Hauschel – freelance Java architect & quality engineer, Munich.
+IT freelancer since 1999, working AI-augmented. → https://hauschel.de
