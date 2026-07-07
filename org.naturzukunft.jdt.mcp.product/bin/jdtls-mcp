@@ -120,15 +120,54 @@ if [ -n "${JDTMCP_VMARGS:-}" ]; then
     EXTRA_VMARGS+=($JDTMCP_VMARGS)
 fi
 
-exec "$JAVA" \
-    -Djdtmcp.headless=true \
-    -Djdtmcp.transport="$TRANSPORT" \
-    -Dosgi.bundles.defaultStartLevel=4 \
-    -Declipse.application=org.naturzukunft.jdt.mcp.headless \
-    "${EXTRA_VMARGS[@]+"${EXTRA_VMARGS[@]}"}" \
-    -jar "$LAUNCHER" \
-    -configuration "$BASEDIR/configuration" \
-    -data "$WORKSPACE" \
-    -nosplash \
-    -clean \
-    "$@"
+# --- Launch with workspace recovery ---
+# Recovery triggers when:
+# 1. Server exits within 30 seconds (workspace likely corrupt), OR
+# 2. Server exits with non-zero code AND log/stderr contains workspace corruption indicators
+# Recovery deletes the workspace and retries once.
+CWD_DIRNAME=$(basename "$PWD")
+LOG_FILE="$HOME/.jdt-mcp/jdt-mcp-${CWD_DIRNAME}.log"
+
+run_server() {
+    "$JAVA" \
+        -Djdtmcp.headless=true \
+        -Djdtmcp.transport="$TRANSPORT" \
+        -Dosgi.bundles.defaultStartLevel=4 \
+        -Declipse.application=org.naturzukunft.jdt.mcp.headless \
+        "${EXTRA_VMARGS[@]+"${EXTRA_VMARGS[@]}"}" \
+        -jar "$LAUNCHER" \
+        -configuration "$BASEDIR/configuration" \
+        -data "$WORKSPACE" \
+        -nosplash \
+        -clean \
+        "$@"
+}
+
+START_TIME=$(date +%s)
+run_server "$@"
+EXIT_CODE=$?
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+needs_recovery=false
+
+if [ "${JDTMCP_RECOVERY:-}" = "1" ] || [ ! -d "$WORKSPACE" ]; then
+    # Already in recovery mode or no workspace to delete
+    needs_recovery=false
+elif [ "$ELAPSED" -lt 30 ]; then
+    # Quick exit — workspace likely corrupt
+    needs_recovery=true
+elif [ "$EXIT_CODE" -ne 0 ] && [ -f "$LOG_FILE" ]; then
+    # Check log for known workspace corruption errors
+    if tail -50 "$LOG_FILE" | grep -qE "ObjectNotFoundException|Tree element.*not found|MCP server failed to start"; then
+        needs_recovery=true
+    fi
+fi
+
+if [ "$needs_recovery" = true ]; then
+    echo "WARNING: Server exited after ${ELAPSED}s (exit code $EXIT_CODE) — workspace corrupt, deleting and retrying..." >&2
+    rm -rf "$WORKSPACE"
+    JDTMCP_RECOVERY=1 exec "$0" "$@"
+fi
+
+exit $EXIT_CODE
