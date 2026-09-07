@@ -69,6 +69,7 @@ public class ExecutionTools {
      * @return the Maven command to use
      */
     private static String detectMavenCommand(File projectDir) {
+        final String LOG_TAG = "MavenDetect";
         boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
         String mvnExecutable = isWindows ? "mvn.cmd" : "mvn";
         String wrapperExecutable = isWindows ? "mvnw.cmd" : "mvnw";
@@ -76,7 +77,7 @@ public class ExecutionTools {
         // 1. Check for Maven Wrapper in project directory
         File mvnw = new File(projectDir, wrapperExecutable);
         if (mvnw.exists() && mvnw.canExecute()) {
-            System.err.println("[JDT MCP] Using Maven Wrapper: " + mvnw.getAbsolutePath());
+            McpLogger.info(LOG_TAG, "Using Maven Wrapper: " + mvnw.getAbsolutePath());
             return mvnw.getAbsolutePath();
         }
 
@@ -85,7 +86,7 @@ public class ExecutionTools {
         if (m2Home != null && !m2Home.isEmpty()) {
             File m2Maven = new File(m2Home, "bin/" + mvnExecutable);
             if (m2Maven.exists() && m2Maven.canExecute()) {
-                System.err.println("[JDT MCP] Using M2_HOME Maven: " + m2Maven.getAbsolutePath());
+                McpLogger.info(LOG_TAG, "Using M2_HOME Maven: " + m2Maven.getAbsolutePath());
                 return m2Maven.getAbsolutePath();
             }
         }
@@ -95,7 +96,7 @@ public class ExecutionTools {
         if (mavenHome != null && !mavenHome.isEmpty()) {
             File mavenHomeMvn = new File(mavenHome, "bin/" + mvnExecutable);
             if (mavenHomeMvn.exists() && mavenHomeMvn.canExecute()) {
-                System.err.println("[JDT MCP] Using MAVEN_HOME Maven: " + mavenHomeMvn.getAbsolutePath());
+                McpLogger.info(LOG_TAG, "Using MAVEN_HOME Maven: " + mavenHomeMvn.getAbsolutePath());
                 return mavenHomeMvn.getAbsolutePath();
             }
         }
@@ -105,13 +106,13 @@ public class ExecutionTools {
         if (userHome != null) {
             File sdkmanMaven = new File(userHome, ".sdkman/candidates/maven/current/bin/" + mvnExecutable);
             if (sdkmanMaven.exists() && sdkmanMaven.canExecute()) {
-                System.err.println("[JDT MCP] Using SDKMAN Maven: " + sdkmanMaven.getAbsolutePath());
+                McpLogger.info(LOG_TAG, "Using SDKMAN Maven: " + sdkmanMaven.getAbsolutePath());
                 return sdkmanMaven.getAbsolutePath();
             }
         }
 
         // 5. Fallback to global 'mvn' command
-        System.err.println("[JDT MCP] Using global Maven command: mvn");
+        McpLogger.info(LOG_TAG, "Using global Maven command: mvn");
         return "mvn";
     }
 
@@ -126,6 +127,7 @@ public class ExecutionTools {
      * @return the JAVA_HOME path or null if not found
      */
     private static String detectJavaHome(String javaVersion) {
+        final String LOG_TAG = "JavaDetect";
         if (javaVersion == null || javaVersion.isEmpty()) {
             return null;
         }
@@ -143,7 +145,7 @@ public class ExecutionTools {
                         if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + ".")) {
                             File javaExe = new File(candidate, "bin/java");
                             if (javaExe.exists()) {
-                                System.err.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                McpLogger.info(LOG_TAG, "Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
                                 return candidate.getAbsolutePath();
                             }
                         }
@@ -153,7 +155,7 @@ public class ExecutionTools {
                         if (candidate.isDirectory() && candidate.getName().startsWith(javaVersion + "-")) {
                             File javaExe = new File(candidate, "bin/java");
                             if (javaExe.exists()) {
-                                System.err.println("[JDT MCP] Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
+                                McpLogger.info(LOG_TAG, "Using SDKMAN Java " + javaVersion + ": " + candidate.getAbsolutePath());
                                 return candidate.getAbsolutePath();
                             }
                         }
@@ -173,7 +175,7 @@ public class ExecutionTools {
                          jvm.getName().contains("jdk-" + javaVersion))) {
                         File javaExe = new File(jvm, "bin/java");
                         if (javaExe.exists()) {
-                            System.err.println("[JDT MCP] Using system Java " + javaVersion + ": " + jvm.getAbsolutePath());
+                            McpLogger.info(LOG_TAG, "Using system Java " + javaVersion + ": " + jvm.getAbsolutePath());
                             return jvm.getAbsolutePath();
                         }
                     }
@@ -182,7 +184,7 @@ public class ExecutionTools {
         }
 
         // 3. No specific version found
-        System.err.println("[JDT MCP] Java " + javaVersion + " not found, using system default");
+        McpLogger.info(LOG_TAG, "Java " + javaVersion + " not found, using system default");
         return null;
     }
 
@@ -193,6 +195,7 @@ public class ExecutionTools {
      * @param project the Eclipse project
      */
     private static void configureJavaEnvironment(ProcessBuilder pb, IProject project) {
+        final String LOG_TAG = "JavaEnv";
         try {
             IJavaProject javaProject = JavaCore.create(project);
             if (javaProject != null && javaProject.exists()) {
@@ -202,12 +205,12 @@ public class ExecutionTools {
                     if (javaHome != null) {
                         Map<String, String> env = pb.environment();
                         env.put("JAVA_HOME", javaHome);
-                        System.err.println("[JDT MCP] Set JAVA_HOME=" + javaHome + " for project Java " + javaVersion);
+                        McpLogger.info(LOG_TAG, "Set JAVA_HOME=" + javaHome + " for project Java " + javaVersion);
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Could not configure Java environment: " + e.getMessage());
+            McpLogger.warn(LOG_TAG, "Could not configure Java environment: " + e.getMessage());
         }
     }
 
@@ -261,6 +264,7 @@ public class ExecutionTools {
 
     private static CallToolResult runMavenBuild(String projectName, String goals, String profiles,
             boolean skipTests, boolean offline, int timeoutSeconds) {
+        final String LOG_TAG = "MavenBuild";
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
@@ -297,7 +301,7 @@ public class ExecutionTools {
             command.add("-f");
             command.add(project.getLocation().toString() + "/pom.xml");
 
-            System.err.println("[JDT MCP] Running Maven: " + String.join(" ", command));
+            McpLogger.info(LOG_TAG, "Running Maven: " + String.join(" ", command));
 
             // Execute
             ProcessBuilder pb = new ProcessBuilder(command);
@@ -392,6 +396,7 @@ public class ExecutionTools {
     }
 
     private static CallToolResult runMain(String className, String cmdArgs, int timeoutSeconds) {
+        final String LOG_TAG = "RunMain";
         try {
             // Find the type and its project
             IType type = null;
@@ -479,7 +484,7 @@ public class ExecutionTools {
                 }
             }
 
-            System.err.println("[JDT MCP] Running: " + String.join(" ", command));
+            McpLogger.info(LOG_TAG, "Running: " + String.join(" ", command));
 
             // Execute
             ProcessBuilder pb = new ProcessBuilder(command);

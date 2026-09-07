@@ -18,11 +18,15 @@ import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.naturzukunft.jdt.mcp.McpLogger;
+
 /**
  * Embedded HTTP server for MCP protocol using Jetty.
  * Provides SSE (Server-Sent Events) transport for MCP communication.
  */
 public class McpHttpServer implements ProgressNotificationSender {
+
+    private static final String COMPONENT = "McpHttpServer";
 
     private final Server server;
     private final int port;
@@ -62,10 +66,10 @@ public class McpHttpServer implements ProgressNotificationSender {
      */
     public void start() throws Exception {
         server.start();
-        System.err.println("[JDT MCP] HTTP Server started on port " + port);
-        System.err.println("[JDT MCP] MCP HTTP endpoint: http://localhost:" + port + "/mcp (recommended)");
-        System.err.println("[JDT MCP] SSE endpoint: http://localhost:" + port + "/sse");
-        System.err.println("[JDT MCP] Message endpoint: http://localhost:" + port + "/message");
+        McpLogger.info(COMPONENT, "HTTP Server started on port " + port);
+        McpLogger.info(COMPONENT, "MCP HTTP endpoint: http://localhost:" + port + "/mcp (recommended)");
+        McpLogger.info(COMPONENT, "SSE endpoint: http://localhost:" + port + "/sse");
+        McpLogger.info(COMPONENT, "Message endpoint: http://localhost:" + port + "/message");
     }
 
     /**
@@ -79,7 +83,7 @@ public class McpHttpServer implements ProgressNotificationSender {
         sseConnections.clear();
 
         server.stop();
-        System.err.println("[JDT MCP] HTTP Server stopped");
+        McpLogger.info(COMPONENT, "HTTP Server stopped");
     }
 
     /**
@@ -154,12 +158,12 @@ public class McpHttpServer implements ProgressNotificationSender {
             }
 
             String requestJson = body.toString();
-            System.err.println("[JDT MCP] HTTP Request: " + requestJson);
+            McpLogger.debug(COMPONENT, "HTTP Request: " + requestJson);
 
             // Process the message
             String responseJson = protocolHandler.handleMessage(requestJson);
 
-            System.err.println("[JDT MCP] HTTP Response: " + responseJson);
+            McpLogger.debug(COMPONENT, "HTTP Response: " + responseJson);
 
             // Return response
             resp.setStatus(HttpServletResponse.SC_OK);
@@ -213,7 +217,7 @@ public class McpHttpServer implements ProgressNotificationSender {
             SseConnection connection = new SseConnection(connectionId, asyncContext);
             sseConnections.put(connectionId, connection);
 
-            System.err.println("[JDT MCP] SSE connection established: " + connectionId);
+            McpLogger.info(COMPONENT, "SSE connection established: " + connectionId);
 
             // Send endpoint event with message URL (relative path like Spring Tools MCP)
             String messageUrl = "/message?sessionId=" + connectionId;
@@ -224,7 +228,7 @@ public class McpHttpServer implements ProgressNotificationSender {
                 @Override
                 public void onComplete(jakarta.servlet.AsyncEvent event) {
                     sseConnections.remove(connectionId);
-                    System.err.println("[JDT MCP] SSE connection closed: " + connectionId);
+                    McpLogger.info(COMPONENT, "SSE connection closed: " + connectionId);
                 }
 
                 @Override
@@ -283,7 +287,7 @@ public class McpHttpServer implements ProgressNotificationSender {
             }
 
             String requestJson = body.toString();
-            System.err.println("[JDT MCP] Received message: " + requestJson);
+            McpLogger.debug(COMPONENT, "Received message: " + requestJson);
 
             // Process the message
             String responseJson = protocolHandler.handleMessage(requestJson);
@@ -322,7 +326,7 @@ public class McpHttpServer implements ProgressNotificationSender {
             try {
                 this.writer = asyncContext.getResponse().getWriter();
             } catch (IOException e) {
-                System.err.println("[JDT MCP] Error getting writer: " + e.getMessage());
+                McpLogger.error(COMPONENT, "Error getting writer: " + e.getMessage());
             }
         }
 
@@ -343,7 +347,7 @@ public class McpHttpServer implements ProgressNotificationSender {
                     writer.write("\n");
                     writer.flush();
                 } catch (Exception e) {
-                    System.err.println("[JDT MCP] Error sending SSE event: " + e.getMessage());
+                    McpLogger.warn(COMPONENT, "Error sending SSE event: " + e.getMessage());
                 }
             }
         }

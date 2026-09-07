@@ -13,6 +13,7 @@ import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.JavaCore;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -364,7 +365,7 @@ public class CreationTools {
                 return JavaCore.create(project);
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error getting Java project: " + e.getMessage());
+            McpLogger.error("CreationTools", "Error getting Java project: " + e.getMessage());
         }
         return null;
     }
@@ -385,7 +386,7 @@ public class CreationTools {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding source folder: " + e.getMessage());
+            McpLogger.error("CreationTools", "Error finding source folder: " + e.getMessage());
         }
         return null;
     }

@@ -24,6 +24,7 @@ import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
 import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.TextEdit;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1627,7 +1628,7 @@ public class CodeGenerationTools {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding type: " + e.getMessage());
+            McpLogger.error("CodeGenerationTools", "Error finding type: " + e.getMessage());
         }
         return null;
     }

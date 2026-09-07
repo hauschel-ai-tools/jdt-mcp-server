@@ -27,6 +27,7 @@ import org.eclipse.jdt.core.search.SearchMatch;
 import org.eclipse.jdt.core.search.SearchParticipant;
 import org.eclipse.jdt.core.search.SearchPattern;
 import org.eclipse.jdt.core.search.SearchRequestor;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -464,7 +465,7 @@ public class CodeAnalysisTools {
                 default -> null;
             };
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error resolving element: " + e.getMessage());
+            McpLogger.error("CodeAnalysisTools", "Error resolving element: " + e.getMessage());
             return null;
         }
     }
@@ -482,7 +483,7 @@ public class CodeAnalysisTools {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding type: " + e.getMessage());
+            McpLogger.error("CodeAnalysisTools", "Error finding type: " + e.getMessage());
         }
         return null;
     }

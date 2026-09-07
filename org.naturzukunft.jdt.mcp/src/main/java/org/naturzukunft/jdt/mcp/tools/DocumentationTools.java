@@ -27,6 +27,7 @@ import org.eclipse.jdt.core.search.SearchMatch;
 import org.eclipse.jdt.core.search.SearchParticipant;
 import org.eclipse.jdt.core.search.SearchPattern;
 import org.eclipse.jdt.core.search.SearchRequestor;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -527,7 +528,7 @@ public class DocumentationTools {
                     return type;
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding member: " + e.getMessage());
+            McpLogger.error("DocumentationTools", "Error finding member: " + e.getMessage());
             return null;
         }
     }
