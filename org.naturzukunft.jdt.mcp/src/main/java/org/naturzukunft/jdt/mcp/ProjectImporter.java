@@ -232,11 +232,13 @@ public class ProjectImporter {
 
             List<IClasspathEntry> entries = new ArrayList<>();
 
-            // Add source folders that exist
+            // Add source folders that exist. Test sources get their own output folder
+            // (target/test-classes) so they don't compile into target/classes and end up
+            // packaged into the module's jar (#84).
             addSourceFolderIfExists(project, entries, "src/main/java");
-            addSourceFolderIfExists(project, entries, "src/test/java");
+            addSourceFolderIfExists(project, entries, "src/test/java", "target/test-classes");
             addSourceFolderIfExists(project, entries, "src/main/resources");
-            addSourceFolderIfExists(project, entries, "src/test/resources");
+            addSourceFolderIfExists(project, entries, "src/test/resources", "target/test-classes");
 
             // If no standard Maven dirs found, check for src/ directly
             if (entries.isEmpty()) {
@@ -320,13 +322,33 @@ public class ProjectImporter {
 
     /**
      * Adds a source folder to classpath entries if the folder exists on disk.
+     * Uses the project's default output location (e.g. main sources compiling into
+     * {@code target/classes}).
      */
     private static void addSourceFolderIfExists(IProject project, List<IClasspathEntry> entries, String folderPath) {
+        addSourceFolderIfExists(project, entries, folderPath, null);
+    }
+
+    /**
+     * Adds a source folder to classpath entries if the folder exists on disk, with an
+     * optional dedicated output location. Test sources need their own output folder
+     * (e.g. Maven's {@code target/test-classes}, Gradle's {@code build/classes/java/test})
+     * so they neither compile into the main output nor end up packaged into the main jar.
+     * Pass {@code null} to fall back to the project's default output location.
+     */
+    private static void addSourceFolderIfExists(IProject project, List<IClasspathEntry> entries, String folderPath,
+            String outputFolderPath) {
         Path absolutePath = Path.of(project.getLocation().toOSString(), folderPath);
-        if (Files.isDirectory(absolutePath)) {
-            org.eclipse.core.runtime.IPath srcPath = project.getFullPath().append(folderPath);
-            entries.add(JavaCore.newSourceEntry(srcPath));
+        if (!Files.isDirectory(absolutePath)) {
+            return;
         }
+        org.eclipse.core.runtime.IPath srcPath = project.getFullPath().append(folderPath);
+        if (outputFolderPath == null) {
+            entries.add(JavaCore.newSourceEntry(srcPath));
+            return;
+        }
+        org.eclipse.core.runtime.IPath outputPath = project.getFullPath().append(outputFolderPath);
+        entries.add(JavaCore.newSourceEntry(srcPath, new org.eclipse.core.runtime.IPath[0], outputPath));
     }
 
     /**
@@ -738,14 +760,15 @@ public class ProjectImporter {
             IJavaProject javaProject = JavaCore.create(project);
             List<IClasspathEntry> entries = new ArrayList<>();
 
-            // Standard Gradle/Maven source layout
+            // Standard Gradle/Maven source layout. Test sources get their own output folder
+            // (build/classes/java/test) so they don't compile into build/classes/java/main (#84).
             addSourceFolderIfExists(project, entries, "src/main/java");
-            addSourceFolderIfExists(project, entries, "src/test/java");
+            addSourceFolderIfExists(project, entries, "src/test/java", "build/classes/java/test");
             addSourceFolderIfExists(project, entries, "src/main/resources");
-            addSourceFolderIfExists(project, entries, "src/test/resources");
+            addSourceFolderIfExists(project, entries, "src/test/resources", "build/classes/java/test");
             // Kotlin source dirs
             addSourceFolderIfExists(project, entries, "src/main/kotlin");
-            addSourceFolderIfExists(project, entries, "src/test/kotlin");
+            addSourceFolderIfExists(project, entries, "src/test/kotlin", "build/classes/java/test");
 
             if (entries.isEmpty()) {
                 addSourceFolderIfExists(project, entries, "src");
