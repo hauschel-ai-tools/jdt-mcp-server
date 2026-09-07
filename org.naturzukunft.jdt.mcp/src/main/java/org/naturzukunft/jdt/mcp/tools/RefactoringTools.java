@@ -160,8 +160,9 @@ public class RefactoringTools {
                 result.put("warnings", RefactoringSupport.extractStatusMessages(checkStatus));
             }
 
+            Change change = extractRefactoring.createChange(new NullProgressMonitor());
+
             if (previewOnly) {
-                Change change = extractRefactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of extract method refactoring");
                 result.put("changes", RefactoringSupport.describeChange(change));
@@ -169,7 +170,6 @@ public class RefactoringTools {
             }
 
             // Execute the refactoring
-            Change change = extractRefactoring.createChange(new NullProgressMonitor());
             RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
@@ -357,9 +357,10 @@ public class RefactoringTools {
                     result.put("warnings", moveWarnings);
                 }
 
+                phase.set("creating changes");
+                Change change = refactoring.createChange(monitor);
+
                 if (previewOnly) {
-                    phase.set("generating preview");
-                    Change change = refactoring.createChange(monitor);
                     result.put("status", "PREVIEW");
                     result.put("message", "Preview of move refactoring");
                     result.put("changes", RefactoringSupport.describeChange(change));
@@ -367,8 +368,6 @@ public class RefactoringTools {
                 }
 
                 // Execute the refactoring
-                phase.set("creating changes");
-                Change change = refactoring.createChange(monitor);
                 phase.set("applying changes to " + RefactoringSupport.countLeafChanges(change) + " files");
                 RefactoringSupport.performChange(change, monitor);
 
@@ -463,15 +462,15 @@ public class RefactoringTools {
                         return new CallToolResult(MAPPER.writeValueAsString(result), true);
                     }
 
+                    Change change = inlineTemp.createChange(new NullProgressMonitor());
+
                     if (previewOnly) {
-                        Change change = inlineTemp.createChange(new NullProgressMonitor());
                         result.put("status", "PREVIEW");
                         result.put("inlineType", "LOCAL_VARIABLE");
                         result.put("changes", RefactoringSupport.describeChange(change));
                         return new CallToolResult(MAPPER.writeValueAsString(result), false);
                     }
 
-                    Change change = inlineTemp.createChange(new NullProgressMonitor());
                     RefactoringSupport.performChange(change, new NullProgressMonitor());
 
                     result.put("status", "SUCCESS");
@@ -510,15 +509,15 @@ public class RefactoringTools {
                                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
                             }
 
+                            Change change = inlineMethod.createChange(new NullProgressMonitor());
+
                             if (previewOnly) {
-                                Change change = inlineMethod.createChange(new NullProgressMonitor());
                                 result.put("status", "PREVIEW");
                                 result.put("inlineType", "METHOD");
                                 result.put("changes", RefactoringSupport.describeChange(change));
                                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
                             }
 
-                            Change change = inlineMethod.createChange(new NullProgressMonitor());
                             RefactoringSupport.performChange(change, new NullProgressMonitor());
 
                             result.put("status", "SUCCESS");
@@ -684,14 +683,14 @@ public class RefactoringTools {
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
+            Change change = refactoring.createChange(new NullProgressMonitor());
+
             if (previewOnly) {
-                Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
-            Change change = refactoring.createChange(new NullProgressMonitor());
             RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
@@ -794,20 +793,22 @@ public class RefactoringTools {
             result.put("getterName", getterName);
             result.put("setterName", setterName);
 
-            if (status.hasError()) {
+            List<String> realErrors = RefactoringSupport.getRealErrors(status);
+            if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Encapsulate field has errors: " + status.toString());
+                result.put("message", "Encapsulate field has errors: " + String.join("; ", realErrors));
+                result.put("errors", realErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
+            Change change = refactoring.createChange(new NullProgressMonitor());
+
             if (previewOnly) {
-                Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
-            Change change = refactoring.createChange(new NullProgressMonitor());
             RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
@@ -905,10 +906,11 @@ public class RefactoringTools {
             status.merge(initialStatus);
             status.merge(finalStatus);
 
-            if (status.hasError()) {
+            List<String> realErrors = RefactoringSupport.getRealErrors(status);
+            if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Introduce parameter has errors: " + status.toString());
-                result.put("errors", RefactoringSupport.extractStatusMessages(status));
+                result.put("message", "Introduce parameter has errors: " + String.join("; ", realErrors));
+                result.put("errors", realErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
@@ -916,14 +918,14 @@ public class RefactoringTools {
                 result.put("warnings", RefactoringSupport.extractStatusMessages(status));
             }
 
+            Change change = refactoring.createChange(new NullProgressMonitor());
+
             if (previewOnly) {
-                Change change = refactoring.createChange(new NullProgressMonitor());
                 result.put("status", "PREVIEW");
                 result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
             }
 
-            Change change = refactoring.createChange(new NullProgressMonitor());
             RefactoringSupport.performChange(change, new NullProgressMonitor());
 
             result.put("status", "SUCCESS");
