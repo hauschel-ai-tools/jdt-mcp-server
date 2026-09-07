@@ -120,13 +120,30 @@ if [ -n "${JDTMCP_VMARGS:-}" ]; then
     EXTRA_VMARGS+=($JDTMCP_VMARGS)
 fi
 
-# --- Launch with workspace recovery ---
-# Recovery triggers when:
-# 1. Server exits within 30 seconds (workspace likely corrupt), OR
-# 2. Server exits with non-zero code AND log/stderr contains workspace corruption indicators
-# Recovery deletes the workspace and retries once.
-CWD_DIRNAME=$(basename "$PWD")
-LOG_FILE="$HOME/.jdt-mcp/jdt-mcp-${CWD_DIRNAME}.log"
+# --- Process lifecycle ---
+# The JVM runs as a background job in its own process group (set -m) so that a
+# group-wide stop signal aimed at the client (Ctrl-Z, SIGTTOU) does not freeze it.
+# The wrapper stays in the foreground to forward signals and to evaluate the exit
+# code for workspace recovery. Without this, killing the wrapper leaves the JVM
+# behind as an orphan holding ~1 GB (#80).
+set -m
+
+JAVA_PID=""
+SIGNALLED=""
+
+forward_signal() {
+    local sig="$1"
+    SIGNALLED="$sig"
+    if [ -n "$JAVA_PID" ] && kill -0 "$JAVA_PID" 2>/dev/null; then
+        # A stopped JVM cannot act on SIGTERM — resume it first
+        kill -CONT "$JAVA_PID" 2>/dev/null || true
+        kill -"$sig" "$JAVA_PID" 2>/dev/null || true
+    fi
+}
+trap 'forward_signal TERM' TERM
+trap 'forward_signal INT' INT
+trap 'forward_signal HUP' HUP
+trap 'forward_signal TERM' EXIT
 
 run_server() {
     "$JAVA" \
@@ -140,12 +157,32 @@ run_server() {
         -data "$WORKSPACE" \
         -nosplash \
         -clean \
-        "$@"
+        "$@" &
+    JAVA_PID=$!
+
+    # wait returns early when a trapped signal arrives; keep waiting until the
+    # JVM is really gone so EXIT_CODE reflects its exit status.
+    local code=0
+    while true; do
+        if wait "$JAVA_PID"; then code=0; else code=$?; fi
+        kill -0 "$JAVA_PID" 2>/dev/null || break
+    done
+    return "$code"
 }
 
+# --- Launch with workspace recovery ---
+# Recovery triggers when:
+# 1. Server exits within 30 seconds (workspace likely corrupt), OR
+# 2. Server exits with non-zero code AND log/stderr contains workspace corruption indicators
+# Recovery deletes the workspace and retries once.
+# A shutdown caused by the client (signal forwarded, or clean exit 0 after stdin
+# closed) is never treated as corruption.
+CWD_DIRNAME=$(basename "$PWD")
+LOG_FILE="$HOME/.jdt-mcp/jdt-mcp-${CWD_DIRNAME}.log"
+
 START_TIME=$(date +%s)
-run_server "$@"
-EXIT_CODE=$?
+EXIT_CODE=0
+run_server "$@" || EXIT_CODE=$?
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
@@ -154,10 +191,13 @@ needs_recovery=false
 if [ "${JDTMCP_RECOVERY:-}" = "1" ] || [ ! -d "$WORKSPACE" ]; then
     # Already in recovery mode or no workspace to delete
     needs_recovery=false
+elif [ -n "$SIGNALLED" ] || [ "$EXIT_CODE" -eq 0 ]; then
+    # Client-initiated shutdown — nothing to recover
+    needs_recovery=false
 elif [ "$ELAPSED" -lt 30 ]; then
-    # Quick exit — workspace likely corrupt
+    # Quick failure — workspace likely corrupt
     needs_recovery=true
-elif [ "$EXIT_CODE" -ne 0 ] && [ -f "$LOG_FILE" ]; then
+elif [ -f "$LOG_FILE" ]; then
     # Check log for known workspace corruption errors
     if tail -50 "$LOG_FILE" | grep -qE "ObjectNotFoundException|Tree element.*not found|MCP server failed to start"; then
         needs_recovery=true
@@ -167,7 +207,9 @@ fi
 if [ "$needs_recovery" = true ]; then
     echo "WARNING: Server exited after ${ELAPSED}s (exit code $EXIT_CODE) — workspace corrupt, deleting and retrying..." >&2
     rm -rf "$WORKSPACE"
+    trap - EXIT
     JDTMCP_RECOVERY=1 exec "$0" "$@"
 fi
 
-exit $EXIT_CODE
+trap - EXIT
+exit "$EXIT_CODE"
