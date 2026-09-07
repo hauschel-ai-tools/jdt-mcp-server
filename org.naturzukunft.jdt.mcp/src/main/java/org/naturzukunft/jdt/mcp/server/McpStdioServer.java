@@ -8,6 +8,9 @@ import java.util.concurrent.CountDownLatch;
 
 import org.naturzukunft.jdt.mcp.McpLogger;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 /**
  * MCP server transport over stdio (stdin/stdout).
  * Each message is a JSON-RPC object on a single line (NDJSON).
@@ -16,7 +19,10 @@ import org.naturzukunft.jdt.mcp.McpLogger;
  */
 public class McpStdioServer implements ProgressNotificationSender {
 
+    private static final String JSONRPC_VERSION = "2.0";
+
     private final McpProtocolHandler protocolHandler;
+    private final ObjectMapper mapper = new ObjectMapper();
     private final CountDownLatch stoppedLatch = new CountDownLatch(1);
     private volatile boolean running = false;
     private Thread readerThread;
@@ -117,9 +123,21 @@ public class McpStdioServer implements ProgressNotificationSender {
 
     @Override
     public void sendProgress(String progressToken, int current, int total, String message) {
-        String progressJson = String.format(
-                "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":\"%s\",\"progress\":%d,\"total\":%d,\"message\":\"%s\"}}",
-                progressToken, current, total, message != null ? message.replace("\"", "\\\"") : "");
-        writeLine(progressJson);
+        try {
+            ObjectNode notification = mapper.createObjectNode();
+            notification.put("jsonrpc", JSONRPC_VERSION);
+            notification.put("method", "notifications/progress");
+
+            ObjectNode params = mapper.createObjectNode();
+            params.put("progressToken", progressToken);
+            params.put("progress", current);
+            params.put("total", total);
+            params.put("message", message != null ? message : "");
+            notification.set("params", params);
+
+            writeLine(mapper.writeValueAsString(notification));
+        } catch (Exception e) {
+            McpLogger.error("StdioServer", "Error creating progress notification", e);
+        }
     }
 }
