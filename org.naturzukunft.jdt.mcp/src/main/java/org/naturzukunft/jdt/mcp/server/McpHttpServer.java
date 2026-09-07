@@ -20,6 +20,9 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import org.naturzukunft.jdt.mcp.McpLogger;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 /**
  * Embedded HTTP server for MCP protocol using Jetty.
  * Provides SSE (Server-Sent Events) transport for MCP communication.
@@ -27,6 +30,9 @@ import org.naturzukunft.jdt.mcp.McpLogger;
 public class McpHttpServer implements ProgressNotificationSender {
 
     private static final String COMPONENT = "McpHttpServer";
+    private static final String JSONRPC_VERSION = "2.0";
+
+    private final ObjectMapper mapper = new ObjectMapper();
 
     private final Server server;
     private final int port;
@@ -121,13 +127,23 @@ public class McpHttpServer implements ProgressNotificationSender {
 
     @Override
     public void sendProgress(String progressToken, int current, int total, String message) {
-        // Build MCP progress notification JSON
-        String progressJson = String.format(
-            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":\"%s\",\"progress\":%d,\"total\":%d,\"message\":\"%s\"}}",
-            progressToken, current, total, message != null ? message.replace("\"", "\\\"") : ""
-        );
-        // Broadcast to all SSE connections
-        broadcastEvent("message", progressJson);
+        try {
+            ObjectNode notification = mapper.createObjectNode();
+            notification.put("jsonrpc", JSONRPC_VERSION);
+            notification.put("method", "notifications/progress");
+
+            ObjectNode params = mapper.createObjectNode();
+            params.put("progressToken", progressToken);
+            params.put("progress", current);
+            params.put("total", total);
+            params.put("message", message != null ? message : "");
+            notification.set("params", params);
+
+            // Broadcast to all SSE connections
+            broadcastEvent("message", mapper.writeValueAsString(notification));
+        } catch (Exception e) {
+            McpLogger.error(COMPONENT, "Error creating progress notification", e);
+        }
     }
 
     /**

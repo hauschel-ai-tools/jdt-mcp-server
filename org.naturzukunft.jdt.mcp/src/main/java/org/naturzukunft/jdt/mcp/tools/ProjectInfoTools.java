@@ -19,6 +19,7 @@ import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.JavaCore;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 import org.naturzukunft.jdt.mcp.ProjectImporter;
 
@@ -733,7 +734,7 @@ public class ProjectInfoTools {
                 return JavaCore.create(project);
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error getting Java project: " + e.getMessage());
+            McpLogger.error("ProjectInfoTools", "Error getting Java project: " + e.getMessage());
         }
         return null;
     }
