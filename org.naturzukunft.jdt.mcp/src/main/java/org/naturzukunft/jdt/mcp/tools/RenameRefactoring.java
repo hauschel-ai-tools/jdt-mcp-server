@@ -95,7 +95,13 @@ class RenameRefactoring {
                                 "description", "Only for PACKAGE: also rename sub-packages recursively (default: true). E.g., renaming 'com.old' also renames 'com.old.sub' to 'com.new.sub'"),
                         "preview", Map.of(
                                 "type", "boolean",
-                                "description", "If true, only preview changes without applying (default: false)")),
+                                "description", "If true, only preview changes without applying (default: false)"),
+                        "ignoreCompileErrors", Map.of(
+                                "type", "boolean",
+                                "description", "Proceed even if a referencing file elsewhere in the workspace already "
+                                        + "has compile errors (default: false). Such findings are usually only "
+                                        + "warnings; set true if a blocking 'compile error' finding should not stop "
+                                        + "the rename.")),
                 List.of("elementName", "newName", "elementType"),
                 null, null, null);
 
@@ -107,6 +113,7 @@ class RenameRefactoring {
                 "PACKAGE RENAME: Renames package, moves files, updates all imports. Use renameSubpackages=true (default) to include sub-packages. " +
                 "TIP: preview=true shows exactly what changes before applying. " +
                 "GENERIC OVERRIDES: overriding methods of a generic declaration (Processor<T>.process(T) → SimpleProcessor.process(String)) are renamed as well; anything that could not be renamed is listed in 'unrenamedOverrides' with status WARNING — those files then need a manual rename. " +
+                "A referencing file that already has compile errors is normally only a warning; set ignoreCompileErrors=true if a JDT version ever reports this as a blocking 'compile error' finding instead. " +
                 "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel — they modify shared workspace state. Call them one at a time.",
                 schema,
                 null);
@@ -118,7 +125,8 @@ class RenameRefactoring {
                 args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
                 args.get("renameSubpackages") != null ? (Boolean) args.get("renameSubpackages") : true,
                 args.get("preview") != null ? (Boolean) args.get("preview") : false,
-                0));
+                0,
+                args.get("ignoreCompileErrors") != null ? (Boolean) args.get("ignoreCompileErrors") : false));
     }
 
     /**
@@ -126,7 +134,8 @@ class RenameRefactoring {
      *                      {@link #completeOverrideRenames}; 0 for a call from the tool.
      */
     private static CallToolResult renameElement(String elementName, String newName, String elementType,
-            boolean updateReferences, boolean renameSubpackages, boolean previewOnly, int overrideDepth) {
+            boolean updateReferences, boolean renameSubpackages, boolean previewOnly, int overrideDepth,
+            boolean ignoreCompileErrors) {
         try {
             // Find the element
             IJavaElement element = RefactoringSupport.findElement(elementName, elementType);
@@ -169,10 +178,12 @@ class RenameRefactoring {
             for (var entry : checkStatus.getEntries()) {
                 McpLogger.debug("RenameRefactoring", "  init: [" + entry.getSeverity() + "] " + entry.getMessage());
             }
-            List<String> initErrors = RefactoringSupport.getRealErrors(checkStatus);
+            List<String> initErrors = RefactoringSupport.getRealErrors(checkStatus, ignoreCompileErrors);
             if (!initErrors.isEmpty()) {
                 return renameErrorResult(elementName, newName, elementType, updateReferences,
-                        "Initial conditions failed: " + String.join("; ", initErrors), initErrors);
+                        RefactoringSupport.withIgnoreCompileErrorsHint(
+                                "Initial conditions failed: " + String.join("; ", initErrors), initErrors),
+                        initErrors);
             }
 
             // Step 2: checkFinalConditions — THIS IS WHERE REFERENCES ARE SEARCHED.
@@ -222,7 +233,7 @@ class RenameRefactoring {
             }
 
             // Filter participant errors (harmless in headless mode — Launch/Breakpoint participants)
-            List<String> realErrors = RefactoringSupport.getRealErrors(checkStatus).stream()
+            List<String> realErrors = RefactoringSupport.getRealErrors(checkStatus, ignoreCompileErrors).stream()
                     .filter(msg -> overrideDepth == 0 || msg == null
                             || !msg.contains(SHADOWED_BY_RENAMED_DECLARATION))
                     .toList();
@@ -235,7 +246,8 @@ class RenameRefactoring {
 
             if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Refactoring has errors: " + String.join("; ", realErrors));
+                result.put("message", RefactoringSupport.withIgnoreCompileErrorsHint(
+                        "Refactoring has errors: " + String.join("; ", realErrors), realErrors));
                 result.put("errors", realErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
@@ -298,7 +310,7 @@ class RenameRefactoring {
 
             if (methodDeclaringType != null && updateReferences) {
                 OverrideCompletion completion = completeOverrideRenames(methodDeclaringType, oldName, newName,
-                        methodParameterCount, overrideDepth);
+                        methodParameterCount, overrideDepth, ignoreCompileErrors);
                 if (!completion.renamed().isEmpty()) {
                     result.put("overridesRenamedSeparately", completion.renamed());
                 }
@@ -428,7 +440,7 @@ class RenameRefactoring {
      * @return the overrides renamed here, and those that are still named {@code oldName}
      */
     private static OverrideCompletion completeOverrideRenames(IType declaringType, String oldName,
-            String newName, int parameterCount, int overrideDepth) {
+            String newName, int parameterCount, int overrideDepth, boolean ignoreCompileErrors) {
         if (overrideDepth >= MAX_OVERRIDE_COMPLETION_DEPTH) {
             McpLogger.warn("RenameRefactoring", "Override completion depth limit reached for " + oldName);
             return new OverrideCompletion(List.of(), List.of());
@@ -446,7 +458,7 @@ class RenameRefactoring {
         for (IMethod override : stale) {
             String qualifiedName = override.getDeclaringType().getFullyQualifiedName() + "#" + oldName;
             CallToolResult nested = renameElement(qualifiedName, newName, "METHOD", true, true, false,
-                    overrideDepth + 1);
+                    overrideDepth + 1, ignoreCompileErrors);
             if (Boolean.TRUE.equals(nested.isError())) {
                 McpLogger.warn("RenameRefactoring", "Override rename failed for " + qualifiedName);
                 continue;

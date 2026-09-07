@@ -732,7 +732,15 @@ public class RefactoringTools {
                                 "description", "Generate setter method (default: true)"),
                         "preview", Map.of(
                                 "type", "boolean",
-                                "description", "Preview changes without applying (default: false)")),
+                                "description", "Preview changes without applying (default: false)"),
+                        "ignoreCompileErrors", Map.of(
+                                "type", "boolean",
+                                "description", "Proceed even if the field's declaring file already has compile errors "
+                                        + "(default: false). Without this, JDT hard-blocks with 'Cannot analyze field "
+                                        + "... due to the following compile error: ...' — Eclipse shows a 'Continue "
+                                        + "anyway?' dialog for this in the UI, which headless mode has no equivalent "
+                                        + "for. Set true only if the pre-existing errors are unrelated to this field; "
+                                        + "the accessor bodies may still be rendered incorrectly.")),
                 List.of("className", "fieldName"),
                 null, null, null);
 
@@ -740,6 +748,8 @@ public class RefactoringTools {
                 "jdt_encapsulate_field",
                 "Encapsulate a field: make it private and generate getter/setter methods. " +
                 "Updates all direct field accesses to use the accessors. Best practice for data hiding. " +
+                "If the declaring file already has compile errors, this is BLOCKED by default — pass " +
+                "ignoreCompileErrors=true to force it. " +
                 "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
@@ -749,11 +759,12 @@ public class RefactoringTools {
                 (String) args.get("fieldName"),
                 args.get("generateGetter") != null ? (Boolean) args.get("generateGetter") : true,
                 args.get("generateSetter") != null ? (Boolean) args.get("generateSetter") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                args.get("preview") != null ? (Boolean) args.get("preview") : false,
+                args.get("ignoreCompileErrors") != null ? (Boolean) args.get("ignoreCompileErrors") : false));
     }
 
     private static CallToolResult encapsulateField(String className, String fieldName,
-            boolean generateGetter, boolean generateSetter, boolean previewOnly) {
+            boolean generateGetter, boolean generateSetter, boolean previewOnly, boolean ignoreCompileErrors) {
         try {
             IType type = RefactoringSupport.findTypeInSourceProject(className);
 
@@ -805,20 +816,45 @@ public class RefactoringTools {
             result.put("getterName", getterName);
             result.put("setterName", setterName);
 
-            List<String> realErrors = RefactoringSupport.getRealErrors(status);
+            List<String> realErrors = RefactoringSupport.getRealErrors(status, ignoreCompileErrors);
             if (!realErrors.isEmpty()) {
                 result.put("status", "ERROR");
-                result.put("message", "Encapsulate field has errors: " + String.join("; ", realErrors));
+                result.put("message", RefactoringSupport.withIgnoreCompileErrorsHint(
+                        "Encapsulate field has errors: " + String.join("; ", realErrors), realErrors));
                 result.put("errors", realErrors);
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
+            List<String> suppressedCompileErrors = List.of();
+            if (ignoreCompileErrors) {
+                suppressedCompileErrors = RefactoringSupport.getRealErrors(status).stream()
+                        .filter(RefactoringSupport::isCompileErrorMessage)
+                        .toList();
+                if (!suppressedCompileErrors.isEmpty()) {
+                    result.put("warnings", suppressedCompileErrors);
+                }
+            }
 
             Change change = refactoring.createChange(new NullProgressMonitor());
+            int leafChangeCount = RefactoringSupport.countLeafChanges(change);
 
             if (previewOnly) {
                 result.put("status", "PREVIEW");
                 result.put("changes", RefactoringSupport.describeChange(change));
                 return new CallToolResult(MAPPER.writeValueAsString(result), false);
+            }
+
+            // JDT's own compile-error block (bypassed above) exists because its analyzer
+            // could not safely resolve the field's accessor bodies; forcing past it can
+            // leave createChange() with nothing to apply. Report that honestly instead of
+            // claiming SUCCESS for a no-op.
+            if (leafChangeCount == 0 && !suppressedCompileErrors.isEmpty()) {
+                result.put("status", "ERROR");
+                result.put("message", "ignoreCompileErrors was set, but JDT could not compute a usable change for '"
+                        + fieldName + "' — its analyzer needs to resolve the field's type, which the compile error "
+                        + "prevents: " + String.join("; ", suppressedCompileErrors)
+                        + ". Fix the compile error first, then retry without ignoreCompileErrors.");
+                result.put("errors", suppressedCompileErrors);
+                return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
             RefactoringSupport.performChange(change, new NullProgressMonitor());
