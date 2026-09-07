@@ -38,11 +38,35 @@ class RefactoringSupport {
      * violate internal assumptions and cause AssertionFailedException or connection crashes.
      * All mutating MCP tools must acquire this lock before modifying workspace state.
      */
+    private static final int MAX_WORKING_COPY_DISCARDS = 10;
+
     static final java.util.concurrent.locks.ReentrantLock WORKSPACE_MUTATION_LOCK =
             new java.util.concurrent.locks.ReentrantLock();
 
     private RefactoringSupport() {
         // utility class
+    }
+
+    /**
+     * Detaches the jdt.ui buffer provider from JDT's primary working copy owner.
+     *
+     * When the org.eclipse.jdt.ui bundle activates, its JavaPlugin installs a buffer
+     * provider that creates editor-backed buffers (DocumentAdapter). Headless there is
+     * no editor, so opening a compilation unit fails with
+     * NoClassDefFoundError: org/eclipse/jdt/internal/ui/javaeditor/DocumentAdapter.
+     * RenamePackageProcessor.checkForMainAndNativeMethods() hits this on every package
+     * rename, and the Error killed the whole server process because it is not an Exception.
+     *
+     * Clearing the provider makes JDT fall back to its own file-based buffers.
+     * Called at the start of every refactoring, because the UI bundle can activate
+     * lazily at any point during a session.
+     */
+    static void detachUiBufferProvider() {
+        try {
+            org.eclipse.jdt.internal.core.DefaultWorkingCopyOwner.PRIMARY.primaryBufferProvider = null;
+        } catch (Throwable t) {
+            McpLogger.warn("RefactoringSupport", "Could not detach jdt.ui buffer provider: " + t);
+        }
     }
 
     /**
@@ -52,6 +76,7 @@ class RefactoringSupport {
      * are resolved via source, not class files.
      */
     static IType findTypeInSourceProject(String fullyQualifiedName) throws Exception {
+        detachUiBufferProvider();
         IType fallback = null;
         for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
                 .getJavaProjects()) {
@@ -73,6 +98,7 @@ class RefactoringSupport {
      * Finds IPackageFragment by name across all source roots of all projects.
      */
     static IPackageFragment findPackageInSourceProject(String packageName) throws Exception {
+        detachUiBufferProvider();
         for (IJavaProject project : JavaCore.create(ResourcesPlugin.getWorkspace().getRoot())
                 .getJavaProjects()) {
             if (!project.getProject().isOpen()) continue;
@@ -92,6 +118,7 @@ class RefactoringSupport {
      * Helper: Find a Java element by name and type.
      */
     static IJavaElement findElement(String elementName, String elementType) {
+        detachUiBufferProvider();
         try {
             switch (elementType.toUpperCase()) {
                 case "PACKAGE" -> {
@@ -216,6 +243,7 @@ class RefactoringSupport {
     static void performChange(Change change, IProgressMonitor monitor) throws CoreException {
         WORKSPACE_MUTATION_LOCK.lock();
         try {
+            detachUiBufferProvider();
             NullProgressMonitor npm = new NullProgressMonitor();
 
             // Force all TextFileChange instances to save after applying edits
@@ -298,6 +326,26 @@ class RefactoringSupport {
      * The package declaration update has already been applied by a preceding CompilationUnitChange,
      * so the source content already has the correct package declaration.
      */
+    /**
+     * Discards all working copy states of a compilation unit.
+     * discardWorkingCopy() decrements a use counter, so several calls can be needed;
+     * the loop is bounded to keep a broken counter from spinning forever.
+     */
+    private static void discardWorkingCopy(org.eclipse.jdt.core.ICompilationUnit cu) {
+        for (int i = 0; i < MAX_WORKING_COPY_DISCARDS; i++) {
+            try {
+                if (!cu.isWorkingCopy()) {
+                    return;
+                }
+                cu.discardWorkingCopy();
+            } catch (Exception e) {
+                McpLogger.warn("RefactoringSupport",
+                        "Could not discard working copy of " + cu.getElementName() + ": " + e.getMessage());
+                return;
+            }
+        }
+    }
+
     private static void performManualMove(Change change, NullProgressMonitor npm) throws CoreException {
         try {
             Object modified = change.getModifiedElement();
@@ -361,10 +409,17 @@ class RefactoringSupport {
             // Create target compilation unit
             destPkg.createCompilationUnit(cuName, source, true, npm);
 
+            // Drop the working copy of the source BEFORE deleting the file. A working
+            // copy that outlives its resource stays in the Java model as a phantom child
+            // of the old package, and every later operation on that package fails with
+            // "Resource ... does not exist" (e.g. a package rename after a move).
+            discardWorkingCopy(sourceCu);
+
             // Delete source file
             if (sourceFile.exists()) {
                 sourceFile.delete(true, npm);
             }
+            sourceCu.close();
 
             McpLogger.info("RefactoringSupport",
                     "Manual move: " + cuName + " → " + destPkgName);
