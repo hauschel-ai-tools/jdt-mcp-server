@@ -8,6 +8,11 @@
 #   - jdt_rename_element METHOD on a generic interface method     (issue #29)
 #   - jdt_encapsulate_field (jdt.ui code template store headless)  (issue #98)
 #
+# Also covers the ignoreCompileErrors escape hatch: without it, a refactoring
+# target whose declaring file already has (unrelated) compile errors is hard-
+# blocked with no way to proceed, mirroring Eclipse's "Continue anyway?" dialog
+# that headless mode has no equivalent for (issue #75).
+#
 # Every assertion reads the FILESYSTEM, not the tool response, because the tool
 # response was green for both defects while the buffers never reached the disk.
 #
@@ -81,6 +86,8 @@ SIMPLE_PROCESSOR="$CORE_SRC/core/SimpleProcessor.java"
 BATCH_PROCESSOR="$CORE_SRC/core/BatchProcessor.java"
 API_CONFIGURABLE="$PARENT_DIR/fixture-api/src/main/java/org/fixture/api/Configurable.java"
 PROCESSOR_FACTORY="$CORE_SRC/core/ProcessorFactory.java"
+BROKEN_DIR="$PARENT_DIR/fixture-broken/src/main/java/org/fixture/broken"
+BROKEN_CLASS="$BROKEN_DIR/BrokenClass.java"
 
 echo "Fixtures at: $FIXTURE_WORK_DIR"
 
@@ -498,9 +505,84 @@ test_encapsulate_field() {
 
 test_rename_generic_interface_method
 test_rename_plain_interface_method
+
+# ── Test 4: ignoreCompileErrors escape hatch (#75) ────────────────────────────
+# fixture-broken has pre-existing compile errors. Without ignoreCompileErrors,
+# encapsulateField on a field whose OWN type is unresolved (NonExistentType) is
+# hard-blocked by JDT with no way to proceed (headless mode has no "Continue
+# anyway?" dialog). ignoreCompileErrors=true must lift that specific block —
+# but JDT's accessor generator can still never produce valid code for a type
+# that does not exist, so forcing must report an honest error, never a bare
+# NullPointerException and never a false SUCCESS with no actual change.
+
+test_ignore_compile_errors() {
+    echo "[Test 4] jdt_encapsulate_field org.fixture.broken.BrokenClass#field, blocked then forced (#75)"
+
+    if [ ! -f "$BROKEN_CLASS" ]; then
+        fail "ignoreCompileErrors precondition" "fixture file missing: $BROKEN_CLASS"
+        return
+    fi
+
+    local ok=true
+
+    # Default (no flag) — must be blocked with a self-explanatory message.
+    local blocked
+    blocked=$(call_tool "jdt_encapsulate_field" \
+        '{"className":"org.fixture.broken.BrokenClass","fieldName":"field"}') \
+        || { fail "jdt_encapsulate_field without flag (no response)"; return; }
+
+    local blocked_text
+    blocked_text=$(tool_text "$blocked")
+    if [ "$(echo "$blocked" | jq -r '.result.isError // false')" != "true" ]; then
+        echo "  ASSERTION FAILED: default call (no ignoreCompileErrors) must report isError"
+        echo "    $(echo "$blocked_text" | head -c 400)"
+        ok=false
+    fi
+    if ! echo "$blocked_text" | grep -qi "compile error"; then
+        echo "  ASSERTION FAILED: error message must name the compile-error cause"
+        echo "    $(echo "$blocked_text" | head -c 400)"
+        ok=false
+    fi
+    if ! echo "$blocked_text" | grep -q "ignoreCompileErrors"; then
+        echo "  ASSERTION FAILED: error message must self-explain the ignoreCompileErrors flag"
+        echo "    $(echo "$blocked_text" | head -c 400)"
+        ok=false
+    fi
+    assert_file_lacks "$BROKEN_CLASS" "getField()" \
+        "no getter written on disk while blocked" || ok=false
+    assert_file_contains "$BROKEN_CLASS" "private NonExistentType field;" \
+        "field declaration unchanged on disk while blocked" || ok=false
+
+    # ignoreCompileErrors=true cannot make JDT resolve a type that does not
+    # exist — it must report an honest error, never a bare NPE and never a
+    # false SUCCESS with no actual change.
+    local forced
+    forced=$(call_tool "jdt_encapsulate_field" \
+        '{"className":"org.fixture.broken.BrokenClass","fieldName":"field","ignoreCompileErrors":true}') \
+        || { fail "jdt_encapsulate_field with ignoreCompileErrors=true (no response)"; return; }
+
+    local forced_text
+    forced_text=$(tool_text "$forced")
+    if [ "$(echo "$forced" | jq -r '.result.isError // false')" != "true" ]; then
+        echo "  ASSERTION FAILED: forcing an unresolvable field type must still report isError, not a false SUCCESS"
+        echo "    $(echo "$forced_text" | head -c 400)"
+        ok=false
+    fi
+    if echo "$forced_text" | grep -qi "NullPointerException"; then
+        echo "  ASSERTION FAILED: forcing must never leak a bare NullPointerException"
+        echo "    $(echo "$forced_text" | head -c 400)"
+        ok=false
+    fi
+    assert_file_contains "$BROKEN_CLASS" "private NonExistentType field;" \
+        "field declaration STILL unchanged on disk even when forced (no usable change existed)" || ok=false
+
+    if $ok; then pass "ignoreCompileErrors escape hatch"; else fail "ignoreCompileErrors escape hatch"; fi
+}
+
 test_move_type_cross_project
 test_rename_package_with_subpackages
 test_encapsulate_field
+test_ignore_compile_errors
 
 print_summary
 

@@ -172,11 +172,39 @@ class RefactoringSupport {
     }
 
     /**
+     * Substrings (case-insensitive) shared by JDT refactoring status messages that report
+     * pre-existing compile errors in a file the refactoring would touch — e.g.
+     * "... has compile errors" (Checks.checkCompileErrorsInAffectedFile) or "Cannot analyze
+     * field 'x' due to the following compile error: ..." (SelfEncapsulateField).
+     * Used to let callers opt out of this class of block via ignoreCompileErrors, without
+     * having to enumerate every JDT processor that can raise it.
+     *
+     * Deliberately does NOT include "syntax error" (Checks.checkIfCuBroken, raised when
+     * ICompilationUnit#isStructureKnown() is false): bypassing that specific block leaves
+     * JDT's participant machinery (fParticipants) uninitialized and later steps
+     * (checkFinalConditions, createChange) throw a raw NullPointerException instead of a
+     * clean status — a structurally unparseable file cannot be safely forced through.
+     */
+    private static final List<String> COMPILE_ERROR_MARKERS = List.of("compile error");
+
+    /**
      * Checks refactoring status for real errors, filtering out harmless participant
      * errors that occur in headless mode (Launch/Breakpoint/Watchpoint participants).
      * Returns list of real error messages, or empty list if only participant errors.
      */
     static List<String> getRealErrors(RefactoringStatus status) {
+        return getRealErrors(status, false);
+    }
+
+    /**
+     * Same as {@link #getRealErrors(RefactoringStatus)}, but additionally filters out
+     * entries that report pre-existing compile errors in an affected file/project when
+     * {@code ignoreCompileErrors} is true (see {@link #COMPILE_ERROR_MARKER}). JDT itself
+     * only ever downgrades such findings to a Continue-anyway dialog in the UI; headless
+     * there is no dialog, so without this escape hatch a broken, unrelated project in the
+     * workspace can hard-block a refactoring that would otherwise succeed (issue #75).
+     */
+    static List<String> getRealErrors(RefactoringStatus status, boolean ignoreCompileErrors) {
         if (!status.hasError()) {
             return List.of();
         }
@@ -188,10 +216,37 @@ class RefactoringSupport {
                 if (msg != null && msg.contains("participant")) continue;
                 // "potential matches" are informational, not blocking errors
                 if (msg != null && msg.toLowerCase().contains("potential match")) continue;
+                if (ignoreCompileErrors && isCompileErrorMessage(msg)) continue;
                 realErrors.add(msg);
             }
         }
         return realErrors;
+    }
+
+    /**
+     * True if the message is one of JDT's "affected file already has compile errors"
+     * findings (see {@link #COMPILE_ERROR_MARKERS}).
+     */
+    static boolean isCompileErrorMessage(String message) {
+        if (message == null) {
+            return false;
+        }
+        String lower = message.toLowerCase();
+        return COMPILE_ERROR_MARKERS.stream().anyMatch(lower::contains);
+    }
+
+    /**
+     * If {@code errors} contains a compile-error finding, appends a self-explanatory hint
+     * naming the {@code ignoreCompileErrors} flag to {@code message}; otherwise returns
+     * {@code message} unchanged. Used to build error results that never require the
+     * caller to guess why a refactoring was blocked or how to proceed.
+     */
+    static String withIgnoreCompileErrorsHint(String message, List<String> errors) {
+        if (errors.stream().anyMatch(RefactoringSupport::isCompileErrorMessage)) {
+            return message + " Set ignoreCompileErrors=true to proceed anyway "
+                    + "(JDT may not rewrite an already-broken file correctly).";
+        }
+        return message;
     }
 
     /**
