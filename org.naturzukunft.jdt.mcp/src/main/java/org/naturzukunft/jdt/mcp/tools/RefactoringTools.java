@@ -27,6 +27,7 @@ import org.eclipse.jdt.internal.corext.refactoring.reorg.IReorgPolicy;
 import org.eclipse.ltk.core.refactoring.Change;
 import org.eclipse.ltk.core.refactoring.RefactoringStatus;
 import org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring;
+import org.naturzukunft.jdt.mcp.HeadlessCodeTemplates;
 import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
@@ -765,12 +766,23 @@ public class RefactoringTools {
                 return new CallToolResult("Field not found: " + fieldName + " in " + className, true);
             }
 
+            // The refactoring renders the accessor bodies from the JDT code template store,
+            // which only the Eclipse UI plugin fills. Report a missing store as a tool error
+            // instead of letting JDT throw an NPE from deep inside checkFinalConditions().
+            String templateProblem = HeadlessCodeTemplates.checkGetterSetterTemplates();
+            if (templateProblem != null) {
+                return new CallToolResult(templateProblem, true);
+            }
+
             // Create Self Encapsulate Field refactoring
             org.eclipse.jdt.internal.corext.refactoring.sef.SelfEncapsulateFieldRefactoring refactoring =
                 new org.eclipse.jdt.internal.corext.refactoring.sef.SelfEncapsulateFieldRefactoring(field);
 
             refactoring.setGenerateJavadoc(true);
-            refactoring.setVisibility(org.eclipse.jdt.core.Flags.AccPrivate);
+            // Visibility of the GENERATED ACCESSORS, not of the field — the refactoring
+            // always makes the field private. Private accessors would leave every other
+            // class without a way to reach the field.
+            refactoring.setVisibility(org.eclipse.jdt.core.Flags.AccPublic);
             refactoring.setEncapsulateDeclaringClass(true);
 
             // Set getter/setter names

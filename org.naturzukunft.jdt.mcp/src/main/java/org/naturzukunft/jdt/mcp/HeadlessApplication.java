@@ -288,6 +288,12 @@ public class HeadlessApplication implements IApplication {
                 prefs.flush();
                 McpLogger.info("HeadlessApplication", "Set default import order preferences for headless mode");
             }
+
+            // 3. Install the code template store (normally done by JavaPlugin in Eclipse UI).
+            // Without it, SelfEncapsulateFieldRefactoring and every other manipulation
+            // refactoring that renders a method body from a template dies with an NPE on
+            // ProjectTemplateStore.fInstanceStore.
+            HeadlessCodeTemplates.bootstrap();
         } catch (Exception e) {
             McpLogger.warn("HeadlessApplication", "Failed to initialize headless preferences: " + e.getMessage());
         }

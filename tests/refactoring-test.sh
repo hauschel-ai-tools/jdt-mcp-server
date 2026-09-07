@@ -6,6 +6,7 @@
 #   - jdt_move_type across two independently imported projects   (issue #79)
 #   - jdt_rename_element PACKAGE with renameSubpackages=true      (issue #77)
 #   - jdt_rename_element METHOD on a generic interface method     (issue #29)
+#   - jdt_encapsulate_field (jdt.ui code template store headless)  (issue #98)
 #
 # Every assertion reads the FILESYSTEM, not the tool response, because the tool
 # response was green for both defects while the buffers never reached the disk.
@@ -438,10 +439,68 @@ test_rename_package_with_subpackages() {
     if $ok; then pass "jdt_rename_element PACKAGE with subpackages"; else fail "jdt_rename_element PACKAGE with subpackages"; fi
 }
 
+# ── Test 3: jdt_encapsulate_field renders getter/setter headless (#98) ────────
+# Runs AFTER test 2, so org.fixture.core has already become org.fixture.kernel.
+# DataHolder therefore lives at kernel/DataHolder.java at this point.
+
+test_encapsulate_field() {
+    echo "[Test 3] jdt_encapsulate_field org.fixture.kernel.DataHolder#name (#98)"
+
+    local holder="$CORE_SRC/kernel/DataHolder.java"
+
+    if [ ! -f "$holder" ]; then
+        fail "encapsulate_field precondition" "fixture file missing: $holder"
+        return
+    fi
+
+    local response
+    response=$(call_tool "jdt_encapsulate_field" \
+        '{"className":"org.fixture.kernel.DataHolder","fieldName":"name"}') \
+        || { fail "jdt_encapsulate_field (no response)"; return; }
+
+    local ok=true
+    local status
+    status=$(tool_status "$response")
+    local text
+    text=$(tool_text "$response")
+
+    if [ "$(echo "$response" | jq -r '.result.isError // false')" = "true" ]; then
+        echo "  ASSERTION FAILED: tool reported isError"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+    # The headless defect surfaced as a bare NullPointerException from the
+    # jdt.ui code template store — never let that reach the client again.
+    if echo "$text" | grep -qE "NullPointerException|ProjectTemplateStore"; then
+        echo "  ASSERTION FAILED: response leaks a template-store NPE"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+    if [ "$status" != "SUCCESS" ]; then
+        echo "  ASSERTION FAILED: status == SUCCESS"
+        echo "    actual: ${status:-<none>} / $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+
+    assert_file_contains "$holder" "private String name;" \
+        "field made private on disk" || ok=false
+    assert_file_contains "$holder" "public String getName()" \
+        "getter written to disk" || ok=false
+    assert_file_contains "$holder" "public void setName(" \
+        "setter written to disk" || ok=false
+    assert_file_contains "$holder" "return name;" \
+        "getter body rendered (template store bootstrapped)" || ok=false
+    assert_file_contains "$holder" "this.name = name;" \
+        "setter body rendered (template store bootstrapped)" || ok=false
+
+    if $ok; then pass "jdt_encapsulate_field"; else fail "jdt_encapsulate_field"; fi
+}
+
 test_rename_generic_interface_method
 test_rename_plain_interface_method
 test_move_type_cross_project
 test_rename_package_with_subpackages
+test_encapsulate_field
 
 print_summary
 
