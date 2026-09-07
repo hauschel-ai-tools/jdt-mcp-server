@@ -255,7 +255,9 @@ fail() {
     local detail="${2:-}"
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo "  FAIL: $name"
-    [ -n "$detail" ] && echo "    $detail"
+    if [ -n "$detail" ]; then
+        echo "    $detail"
+    fi
 }
 
 skip() {
