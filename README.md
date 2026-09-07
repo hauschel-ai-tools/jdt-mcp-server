@@ -346,6 +346,14 @@ Prüfen, dass die Server-JVM ihren Client nie überlebt (stdin-EOF, Signal-Weite
 tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
 ```
 
+### Refactoring-Tests (End-to-End)
+
+Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-external` als zwei getrennte Projekte und prüfen nach jedem Refactoring den Zustand **auf der Festplatte**, nicht die Tool-Antwort — im Headless-Modus meldete ein Refactoring schon Erfolg, während die Änderungen nur im Puffer standen:
+
+```bash
+tests/refactoring-test.sh [path/to/jdtls-mcp-binary]
+```
+
 ## Lizenz
 
 [EUPL-1.2](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12) - European Union Public Licence
