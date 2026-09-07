@@ -304,6 +304,14 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 
 `jdt_refresh_project` aufrufen! Der Server erkennt externe Änderungen nicht automatisch.
 
+### Server-JVM bleibt nach Session-Ende übrig
+
+Die JVM beendet sich selbst, sobald der Client stdin schließt, der Launcher-Wrapper stirbt oder ein Signal weitergeleitet wird. Bleibt trotzdem ein `java … org.naturzukunft.jdt.mcp.headless`-Prozess zurück, ist er meist gestoppt (Zustand `T` in `ps`) und braucht erst `kill -CONT`, dann `kill -TERM`:
+
+```bash
+pkill -CONT -f jdtmcp.headless; pkill -TERM -f jdtmcp.headless
+```
+
 ### Tests laufen zu lange
 
 `jdt_start_tests_async` statt `jdt_run_tests` verwenden. MCP-Client-Timeout ist 60s.
@@ -329,7 +337,15 @@ Der Server hat stdio-basierte Smoke Tests, die den MCP-Protokoll-Handshake und g
 tests/smoke-test.sh [path/to/jdtls-mcp-binary]
 ```
 
-Ohne Argument wird `jdtls-mcp` aus dem PATH verwendet.
+Ohne Argument wird das Binary aus dem lokalen Build verwendet.
+
+### Lifecycle Tests
+
+Prüfen, dass die Server-JVM ihren Client nie überlebt (stdin-EOF, Signal-Weiterleitung, Parent-Death-Erkennung, eigene Prozessgruppe):
+
+```bash
+tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
+```
 
 ## Lizenz
 

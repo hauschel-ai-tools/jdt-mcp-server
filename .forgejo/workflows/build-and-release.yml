@@ -43,6 +43,10 @@ jobs:
         run: tests/smoke-test.sh
         timeout-minutes: 5
 
+      - name: Run lifecycle tests
+        run: tests/lifecycle-test.sh
+        timeout-minutes: 10
+
       - name: Create release
         if: startsWith(forgejo.ref, 'refs/tags/v')
         run: |

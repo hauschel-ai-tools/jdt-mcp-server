@@ -13,7 +13,9 @@ import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.equinox.app.IApplication;
 import org.eclipse.equinox.app.IApplicationContext;
 
+import org.naturzukunft.jdt.mcp.server.ExitDeadline;
 import org.naturzukunft.jdt.mcp.server.McpStdioServer;
+import org.naturzukunft.jdt.mcp.server.ParentProcessWatchdog;
 
 /**
  * Headless Eclipse application for running the JDT MCP server standalone.
@@ -24,6 +26,7 @@ public class HeadlessApplication implements IApplication {
 
     private static volatile CountDownLatch readyLatch = new CountDownLatch(1);
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
+    private volatile McpStdioServer stdioServer;
 
     /**
      * Returns true if project import and build are still in progress.
@@ -182,10 +185,16 @@ public class HeadlessApplication implements IApplication {
             if ("stdio".equals(transport)) {
                 McpLogger.info("HeadlessApplication", "MCP server running on stdio");
 
-                // In stdio mode, wait for stdin to close (client disconnects)
-                McpStdioServer stdioServer = manager.getStdioServer();
+                // In stdio mode the client owns our lifetime: stop when stdin closes,
+                // when the parent process disappears, or when the framework stops us.
+                stdioServer = manager.getStdioServer();
                 if (stdioServer != null) {
+                    ParentProcessWatchdog.start(() -> {
+                        ExitDeadline.arm("parent process gone");
+                        stdioServer.stop();
+                    });
                     stdioServer.awaitStop();
+                    ExitDeadline.arm("stdio transport stopped");
                 }
             } else {
                 McpLogger.info("HeadlessApplication",
@@ -263,6 +272,12 @@ public class HeadlessApplication implements IApplication {
     @Override
     public void stop() {
         McpLogger.info("HeadlessApplication", "Stop requested");
+        ExitDeadline.arm("stop requested");
         shutdownLatch.countDown();
+        McpStdioServer server = stdioServer;
+        if (server != null) {
+            // Unblock the main thread, otherwise framework shutdown waits for stdin forever
+            server.stop();
+        }
     }
 }
