@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IWorkspace;
@@ -24,7 +25,19 @@ import org.naturzukunft.jdt.mcp.server.ParentProcessWatchdog;
  */
 public class HeadlessApplication implements IApplication {
 
-    private static volatile CountDownLatch readyLatch = new CountDownLatch(1);
+    // Guards the `ready` flag below. A single, never-reassigned monitor instead of a
+    // reassignable CountDownLatch: a reassigned latch lets a caller read a stale (already
+    // counted-down) reference right as reloadWorkspace() swaps it in for a new one, so the
+    // caller returns immediately although the reload is still running (#48). With one fixed
+    // monitor guarding a plain boolean, isImporting()/awaitReady() always observe the current
+    // state; there is no reference to go stale.
+    private static final Object readyMonitor = new Object();
+    private static boolean ready = false;
+
+    // Serializes reloadWorkspace() calls: two concurrent reloads must not interleave their
+    // remove/import/build sequence.
+    private static final ReentrantLock reloadLock = new ReentrantLock();
+
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private volatile McpStdioServer stdioServer;
 
@@ -32,7 +45,9 @@ public class HeadlessApplication implements IApplication {
      * Returns true if project import and build are still in progress.
      */
     public static boolean isImporting() {
-        return readyLatch.getCount() > 0;
+        synchronized (readyMonitor) {
+            return !ready;
+        }
     }
 
     /**
@@ -41,20 +56,55 @@ public class HeadlessApplication implements IApplication {
      * @return true if ready, false if timeout elapsed
      */
     public static boolean awaitReady(long timeout, TimeUnit unit) throws InterruptedException {
-        return readyLatch.await(timeout, unit);
+        long deadlineNanos = System.nanoTime() + unit.toNanos(timeout);
+        synchronized (readyMonitor) {
+            while (!ready) {
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    return false;
+                }
+                long remainingMillis = TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+                readyMonitor.wait(Math.max(remainingMillis, 1));
+            }
+            return true;
+        }
+    }
+
+    /**
+     * Sets the ready flag and wakes up all threads blocked in {@link #awaitReady(long, TimeUnit)}
+     * when transitioning to ready.
+     */
+    private static void setReady(boolean value) {
+        synchronized (readyMonitor) {
+            ready = value;
+            if (value) {
+                readyMonitor.notifyAll();
+            }
+        }
     }
 
     /**
      * Reloads the workspace: removes all projects, re-imports from working directory, and rebuilds.
      * Other tools are blocked via {@link #awaitReady(long, TimeUnit)} while reload is in progress.
+     * Concurrent calls are serialized: a second call blocks until the first reload has finished,
+     * since Eclipse's workspace does not tolerate overlapping project remove/import/build sequences.
      *
      * @return list of imported projects
      */
     public static List<IProject> reloadWorkspace() throws Exception {
+        reloadLock.lock();
+        try {
+            return doReloadWorkspace();
+        } finally {
+            reloadLock.unlock();
+        }
+    }
+
+    private static List<IProject> doReloadWorkspace() throws Exception {
         McpLogger.info("HeadlessApplication", "Reload workspace requested");
 
         // Block other tools during reload
-        readyLatch = new CountDownLatch(1);
+        setReady(false);
 
         try {
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
@@ -112,7 +162,7 @@ public class HeadlessApplication implements IApplication {
 
             return allProjects;
         } finally {
-            readyLatch.countDown();
+            setReady(true);
             McpLogger.info("HeadlessApplication", "Reload workspace finished — ready for requests");
         }
     }
@@ -172,7 +222,7 @@ public class HeadlessApplication implements IApplication {
             } catch (Exception e) {
                 McpLogger.error("HeadlessApplication", "Project import/build failed", e);
             } finally {
-                readyLatch.countDown();
+                setReady(true);
                 McpLogger.info("HeadlessApplication", "Project import and build finished — ready for requests");
             }
         }, "jdtmcp-project-importer");
