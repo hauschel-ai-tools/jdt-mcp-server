@@ -5,6 +5,7 @@
 # workspace on disk was not (fully) updated:
 #   - jdt_move_type across two independently imported projects   (issue #79)
 #   - jdt_rename_element PACKAGE with renameSubpackages=true      (issue #77)
+#   - jdt_rename_element METHOD on a generic interface method     (issue #29)
 #
 # Every assertion reads the FILESYSTEM, not the tool response, because the tool
 # response was green for both defects while the buffers never reached the disk.
@@ -74,6 +75,11 @@ EXTERNAL_DIR="$FIXTURE_WORK_DIR/fixture-external"
 CORE_SRC="$PARENT_DIR/fixture-core/src/main/java/org/fixture"
 APP_SERVICE="$PARENT_DIR/fixture-app/src/main/java/org/fixture/app/AppService.java"
 EXTERNAL_SERVICE="$EXTERNAL_DIR/src/main/java/org/fixture/external/ExternalService.java"
+API_PROCESSOR="$PARENT_DIR/fixture-api/src/main/java/org/fixture/api/Processor.java"
+SIMPLE_PROCESSOR="$CORE_SRC/core/SimpleProcessor.java"
+BATCH_PROCESSOR="$CORE_SRC/core/BatchProcessor.java"
+API_CONFIGURABLE="$PARENT_DIR/fixture-api/src/main/java/org/fixture/api/Configurable.java"
+PROCESSOR_FACTORY="$CORE_SRC/core/ProcessorFactory.java"
 
 echo "Fixtures at: $FIXTURE_WORK_DIR"
 
@@ -241,6 +247,97 @@ echo " Running refactoring end-to-end tests"
 echo "════════════════════════════════════════"
 echo ""
 
+# ── Test 0: rename a generic interface method, overrides included (#29) ───────
+# Runs before the other tests: it must see the fixture with its original package
+# layout (Test 2 renames org.fixture.core).
+
+test_rename_generic_interface_method() {
+    echo "[Test 0] jdt_rename_element METHOD org.fixture.api.Processor#process -> execute (#29)"
+
+    local response
+    response=$(call_tool "jdt_rename_element" \
+        '{"elementName":"org.fixture.api.Processor#process","newName":"execute","elementType":"METHOD"}') \
+        || { fail "jdt_rename_element METHOD (no response)"; return; }
+
+    local ok=true
+    local status
+    status=$(tool_status "$response")
+    local text
+    text=$(tool_text "$response")
+
+    if [ "$(echo "$response" | jq -r '.result.isError // false')" = "true" ]; then
+        echo "  ASSERTION FAILED: tool reported isError"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+    if [ "$status" != "SUCCESS" ]; then
+        echo "  ASSERTION FAILED: status == SUCCESS"
+        echo "    actual: ${status:-<none>} / $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+
+    # Declaration in the generic interface itself
+    assert_file_contains "$API_PROCESSOR" "String execute(T item);" \
+        "interface declaration renamed on disk" || ok=false
+
+    # Overriding implementations in another module — the actual defect of #29
+    assert_file_contains "$SIMPLE_PROCESSOR" "public String execute(String item)" \
+        "override in fixture-core (SimpleProcessor) renamed on disk" || ok=false
+    assert_file_lacks "$SIMPLE_PROCESSOR" "public String process(String item)" \
+        "no stale override declaration in SimpleProcessor" || ok=false
+    assert_file_contains "$BATCH_PROCESSOR" "public String execute(List<String> items)" \
+        "override in fixture-core (BatchProcessor) renamed on disk" || ok=false
+    assert_file_lacks "$BATCH_PROCESSOR" "public String process(List<String> items)" \
+        "no stale override declaration in BatchProcessor" || ok=false
+
+    # Self-call inside the implementing class
+    assert_file_contains "$SIMPLE_PROCESSOR" "String processed = execute(item);" \
+        "self-call inside SimpleProcessor renamed on disk" || ok=false
+
+    # Callers through the interface type
+    assert_file_contains "$APP_SERVICE" "processor.execute(sanitized)" \
+        "caller in fixture-app updated on disk" || ok=false
+    assert_file_contains "$EXTERNAL_SERVICE" "processor.execute(sanitized)" \
+        "cross-project caller in fixture-external updated on disk" || ok=false
+
+    if $ok; then pass "jdt_rename_element METHOD on generic interface"; else fail "jdt_rename_element METHOD on generic interface"; fi
+}
+
+# ── Test 0b: rename a non-generic interface method (regression guard, #29) ────
+# The counterpart to Test 0: without a type variable JDT finds the overrides
+# itself. This test fails if the override completion of #29 starts to fire in
+# cases that already work (a false WARNING or a double rename).
+
+test_rename_plain_interface_method() {
+    echo "[Test 0b] jdt_rename_element METHOD org.fixture.api.Configurable#configure -> setOption (#29 guard)"
+
+    local response
+    response=$(call_tool "jdt_rename_element" \
+        '{"elementName":"org.fixture.api.Configurable#configure","newName":"setOption","elementType":"METHOD"}') \
+        || { fail "jdt_rename_element METHOD non-generic (no response)"; return; }
+
+    local ok=true
+    local status
+    status=$(tool_status "$response")
+    local text
+    text=$(tool_text "$response")
+
+    if [ "$status" != "SUCCESS" ]; then
+        echo "  ASSERTION FAILED: status == SUCCESS (no leftover override expected here)"
+        echo "    actual: ${status:-<none>} / $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+
+    assert_file_contains "$API_CONFIGURABLE" "void setOption(String key, String value);" \
+        "interface declaration renamed on disk" || ok=false
+    assert_file_contains "$SIMPLE_PROCESSOR" "public void setOption(String key, String value)" \
+        "override in fixture-core renamed on disk" || ok=false
+    assert_file_contains "$PROCESSOR_FACTORY" "sp.setOption(\"name\", name);" \
+        "caller in fixture-core updated on disk" || ok=false
+
+    if $ok; then pass "jdt_rename_element METHOD non-generic"; else fail "jdt_rename_element METHOD non-generic"; fi
+}
+
 # ── Test 1: jdt_move_type writes to disk, cross-project (#79) ─────────────────
 
 test_move_type_cross_project() {
@@ -341,6 +438,8 @@ test_rename_package_with_subpackages() {
     if $ok; then pass "jdt_rename_element PACKAGE with subpackages"; else fail "jdt_rename_element PACKAGE with subpackages"; fi
 }
 
+test_rename_generic_interface_method
+test_rename_plain_interface_method
 test_move_type_cross_project
 test_rename_package_with_subpackages
 

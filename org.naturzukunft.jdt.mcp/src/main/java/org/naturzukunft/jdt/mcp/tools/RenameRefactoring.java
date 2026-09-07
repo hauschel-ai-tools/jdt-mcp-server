@@ -1,9 +1,11 @@
 package org.naturzukunft.jdt.mcp.tools;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.runtime.AssertionFailedException;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.ICompilationUnit;
@@ -44,6 +46,27 @@ class RenameRefactoring {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * Warning emitted when the JDT post-rename analysis had to be skipped (issue #29).
+     * The rename itself is applied, only JDT's own "does the result still compile" check
+     * is missing, so the caller is told how to make up for it.
+     */
+    /**
+     * JDT reports this error when an override is renamed to the name its (already renamed)
+     * declaration now carries. Inside the override completion that "shadowing" is exactly the
+     * intended override relationship, so it is not treated as a blocking error there.
+     */
+    private static final String SHADOWED_BY_RENAMED_DECLARATION = "shadowed by a renamed declaration";
+
+    /** Guard against cycles when overrides are renamed recursively (see completeOverrideRenames). */
+    private static final int MAX_OVERRIDE_COMPLETION_DEPTH = 5;
+
+    private static final String POST_RENAME_ANALYSIS_SKIPPED_WARNING =
+            "Post-rename validation was skipped: Eclipse JDT's RenameAnalyzeUtil cannot open "
+            + "preview working copies in headless mode (AssertionFailedException in "
+            + "TextFileChange.releaseDocument). The rename itself was applied normally. "
+            + "Verify the result with jdt_get_compilation_errors.";
+
     private RenameRefactoring() {
         // utility class
     }
@@ -83,6 +106,7 @@ class RenameRefactoring {
                 "EXAMPLE: Rename 'userId' to 'customerId' → updates field, getters, setters, all usages in 50 files automatically. " +
                 "PACKAGE RENAME: Renames package, moves files, updates all imports. Use renameSubpackages=true (default) to include sub-packages. " +
                 "TIP: preview=true shows exactly what changes before applying. " +
+                "GENERIC OVERRIDES: overriding methods of a generic declaration (Processor<T>.process(T) → SimpleProcessor.process(String)) are renamed as well; anything that could not be renamed is listed in 'unrenamedOverrides' with status WARNING — those files then need a manual rename. " +
                 "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel — they modify shared workspace state. Call them one at a time.",
                 schema,
                 null);
@@ -93,11 +117,16 @@ class RenameRefactoring {
                 (String) args.get("elementType"),
                 args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
                 args.get("renameSubpackages") != null ? (Boolean) args.get("renameSubpackages") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                args.get("preview") != null ? (Boolean) args.get("preview") : false,
+                0));
     }
 
+    /**
+     * @param overrideDepth recursion depth of the override completion described in
+     *                      {@link #completeOverrideRenames}; 0 for a call from the tool.
+     */
     private static CallToolResult renameElement(String elementName, String newName, String elementType,
-            boolean updateReferences, boolean renameSubpackages, boolean previewOnly) {
+            boolean updateReferences, boolean renameSubpackages, boolean previewOnly, int overrideDepth) {
         try {
             // Find the element
             IJavaElement element = RefactoringSupport.findElement(elementName, elementType);
@@ -123,6 +152,12 @@ class RenameRefactoring {
 
             McpLogger.info("RenameRefactoring", "Using processor: " + processor.getClass().getSimpleName());
 
+            // Captured before the change is applied: afterwards the element handle no
+            // longer resolves, but the override check below still needs these values.
+            String oldName = element.getElementName();
+            IType methodDeclaringType = element instanceof IMethod m ? m.getDeclaringType() : null;
+            int methodParameterCount = element instanceof IMethod m2 ? m2.getNumberOfParameters() : -1;
+
             org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring refactoring =
                     new org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring(processor);
 
@@ -145,6 +180,10 @@ class RenameRefactoring {
             // In headless mode, RenameFieldProcessor may throw IllegalArgumentException
             // for interface fields (public static final in an interface). If that happens,
             // fall back to AST-based rename which works reliably without Participants.
+            // JDT runs a post-rename analysis inside checkFinalConditions that does not work
+            // headless (see the AssertionFailedException catch below). When it is skipped,
+            // participants are never loaded and the change must be taken from the processor.
+            boolean postRenameAnalysisSkipped = false;
             try {
                 RefactoringStatus finalStatus = refactoring.checkFinalConditions(monitor);
                 McpLogger.info("RenameRefactoring", "checkFinalConditions: severity="
@@ -165,10 +204,28 @@ class RenameRefactoring {
                     return new CallToolResult("Package rename failed: " + errorMsg, true);
                 }
                 return renameViaAst(element, newName, updateReferences, previewOnly);
+            } catch (AssertionFailedException e) {
+                // Headless-mode defect in Eclipse JDT, not in the rename itself:
+                // RenameMethodProcessor.doCheckFinalConditions() first builds the complete
+                // change set (createChanges()) and only then runs analyzeRenameChanges(),
+                // which opens preview working copies via RenameAnalyzeUtil. Outside the IDE
+                // that trips Assert.isTrue() in TextFileChange.releaseDocument().
+                // The change set is already complete at that point, so the analysis is
+                // dropped and the rename continues — with a warning in the result.
+                java.io.StringWriter sw = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(sw));
+                McpLogger.warn("RenameRefactoring",
+                        "checkFinalConditions threw AssertionFailedException (headless JDT, issue #29) — "
+                        + "skipping post-rename analysis and using the processor change set directly."
+                        + "\nStack trace:\n" + sw.toString());
+                postRenameAnalysisSkipped = true;
             }
 
             // Filter participant errors (harmless in headless mode — Launch/Breakpoint participants)
-            List<String> realErrors = RefactoringSupport.getRealErrors(checkStatus);
+            List<String> realErrors = RefactoringSupport.getRealErrors(checkStatus).stream()
+                    .filter(msg -> overrideDepth == 0 || msg == null
+                            || !msg.contains(SHADOWED_BY_RENAMED_DECLARATION))
+                    .toList();
 
             Map<String, Object> result = new HashMap<>();
             result.put("elementName", elementName);
@@ -183,13 +240,16 @@ class RenameRefactoring {
                 return new CallToolResult(MAPPER.writeValueAsString(result), true);
             }
 
-            List<String> warnings = RefactoringSupport.getNonParticipantWarnings(checkStatus);
+            List<String> warnings = new ArrayList<>(RefactoringSupport.getNonParticipantWarnings(checkStatus));
+            if (postRenameAnalysisSkipped) {
+                warnings.add(POST_RENAME_ANALYSIS_SKIPPED_WARNING);
+            }
             if (!warnings.isEmpty()) {
                 result.put("warnings", warnings);
             }
 
             if (previewOnly) {
-                Change change = refactoring.createChange(monitor);
+                Change change = createChange(refactoring, processor, postRenameAnalysisSkipped, monitor);
                 result.put("status", "PREVIEW");
                 result.put("message", "Preview of rename refactoring");
                 result.put("changes", RefactoringSupport.describeChange(change));
@@ -197,7 +257,7 @@ class RenameRefactoring {
             }
 
             // Execute the refactoring
-            Change change = refactoring.createChange(monitor);
+            Change change = createChange(refactoring, processor, postRenameAnalysisSkipped, monitor);
             // Count leaf changes BEFORE perform (perform may clear children)
             int leafChangeCount = RefactoringSupport.countLeafChanges(change);
             Map<String, Object> changeDesc = RefactoringSupport.describeChange(change);
@@ -236,15 +296,58 @@ class RenameRefactoring {
                 result.put("message", "Refactoring completed successfully");
             }
 
+            if (methodDeclaringType != null && updateReferences) {
+                OverrideCompletion completion = completeOverrideRenames(methodDeclaringType, oldName, newName,
+                        methodParameterCount, overrideDepth);
+                if (!completion.renamed().isEmpty()) {
+                    result.put("overridesRenamedSeparately", completion.renamed());
+                }
+                if (!completion.leftovers().isEmpty()) {
+                    result.put("status", "WARNING");
+                    result.put("unrenamedOverrides", completion.leftovers());
+                    result.put("message", unrenamedOverridesMessage(oldName, newName, completion.leftovers()));
+                }
+            }
+
             if (element.getResource() != null) {
                 result.put("file", element.getResource().getLocation().toString());
             }
 
             return new CallToolResult(MAPPER.writeValueAsString(result), false);
 
+        } catch (AssertionFailedException e) {
+            // A bare "assertion failed:" tells a caller nothing — name the known headless
+            // defect and the way out instead.
+            McpLogger.warn("RenameRefactoring", "Rename hit a JDT headless assertion: " + e);
+            return renameErrorResult(elementName, newName, elementType, updateReferences,
+                    "Eclipse JDT aborted the rename with an internal assertion in headless mode "
+                    + "(known limitation, issue #29: TextFileChange/RenameAnalyzeUtil expect a "
+                    + "running IDE workbench). No files were changed by this call. "
+                    + "Workaround: rename the declaration and its overrides one by one, or apply "
+                    + "the change manually and verify with jdt_get_compilation_errors.",
+                    List.of("AssertionFailedException: " + e.getMessage()));
         } catch (Exception e) {
             return ToolErrors.errorResult("rename", e);
         }
+    }
+
+    /**
+     * Creates the change tree for the rename.
+     *
+     * When the post-rename analysis was skipped (headless JDT, issue #29), the refactoring's
+     * participants were never loaded, so {@code ProcessorBasedRefactoring.createChange()} is
+     * not usable and the processor is asked directly. Its change set is complete at that
+     * point: {@code RenameMethodProcessor.doCheckFinalConditions()} calls {@code createChanges()}
+     * before the analysis step that fails.
+     */
+    private static Change createChange(
+            org.eclipse.ltk.core.refactoring.participants.ProcessorBasedRefactoring refactoring,
+            org.eclipse.jdt.internal.corext.refactoring.rename.JavaRenameProcessor processor,
+            boolean postRenameAnalysisSkipped, NullProgressMonitor monitor) throws CoreException {
+        if (postRenameAnalysisSkipped) {
+            return processor.createChange(monitor);
+        }
+        return refactoring.createChange(monitor);
     }
 
     /**
@@ -299,6 +402,105 @@ class RenameRefactoring {
             processor.setNewElementName(newName);
         }
         return processor;
+    }
+
+    /**
+     * Result of the override completion: which overrides this tool renamed on its own and
+     * which ones still carry the old name afterwards.
+     */
+    private record OverrideCompletion(List<String> renamed, List<String> leftovers) {
+    }
+
+    /**
+     * Renames overriding methods that Eclipse JDT left behind (issue #29).
+     *
+     * JDT's RippleMethodFinder2 relates a virtual method to its overrides through
+     * MethodOverrideTester. For a method declared with a type variable — {@code
+     * Processor<T>.process(T)} — it does not relate the override that substitutes the
+     * variable — {@code SimpleProcessor.process(String)} — so the override keeps the old
+     * name and the code no longer compiles. Non-generic virtual methods are unaffected.
+     *
+     * The type hierarchy itself is intact, so the leftovers are located through it and
+     * renamed one by one. Such a single override is no longer virtual once the declaration
+     * has been renamed, which is a case JDT handles correctly — including its call sites
+     * and self-calls, which a plain declaration patch would miss.
+     *
+     * @return the overrides renamed here, and those that are still named {@code oldName}
+     */
+    private static OverrideCompletion completeOverrideRenames(IType declaringType, String oldName,
+            String newName, int parameterCount, int overrideDepth) {
+        if (overrideDepth >= MAX_OVERRIDE_COMPLETION_DEPTH) {
+            McpLogger.warn("RenameRefactoring", "Override completion depth limit reached for " + oldName);
+            return new OverrideCompletion(List.of(), List.of());
+        }
+
+        List<IMethod> stale = findOverridesNamed(declaringType, oldName, parameterCount);
+        if (stale.isEmpty()) {
+            return new OverrideCompletion(List.of(), List.of());
+        }
+
+        McpLogger.warn("RenameRefactoring", "JDT left " + stale.size()
+                + " override(s) named '" + oldName + "' behind (issue #29) — renaming them separately");
+
+        List<String> renamed = new ArrayList<>();
+        for (IMethod override : stale) {
+            String qualifiedName = override.getDeclaringType().getFullyQualifiedName() + "#" + oldName;
+            CallToolResult nested = renameElement(qualifiedName, newName, "METHOD", true, true, false,
+                    overrideDepth + 1);
+            if (Boolean.TRUE.equals(nested.isError())) {
+                McpLogger.warn("RenameRefactoring", "Override rename failed for " + qualifiedName);
+                continue;
+            }
+            renamed.add(qualifiedName);
+        }
+
+        List<String> leftovers = findOverridesNamed(declaringType, oldName, parameterCount).stream()
+                .map(m -> m.getDeclaringType().getFullyQualifiedName() + "#" + oldName)
+                .toList();
+        return new OverrideCompletion(renamed, leftovers);
+    }
+
+    /**
+     * Finds methods named {@code name} with {@code parameterCount} parameters in all subtypes
+     * of {@code declaringType}. Overloads are skipped: with several same-named methods in a
+     * subtype the override cannot be identified by name alone.
+     */
+    private static List<IMethod> findOverridesNamed(IType declaringType, String name, int parameterCount) {
+        List<IMethod> found = new ArrayList<>();
+        try {
+            NullProgressMonitor monitor = new NullProgressMonitor();
+            for (IType subtype : declaringType.newTypeHierarchy(monitor).getAllSubtypes(declaringType)) {
+                ICompilationUnit unit = subtype.getCompilationUnit();
+                if (unit == null) {
+                    continue;
+                }
+                unit.makeConsistent(monitor);
+                List<IMethod> sameName = java.util.Arrays.stream(subtype.getMethods())
+                        .filter(m -> m.getElementName().equals(name))
+                        .toList();
+                if (sameName.size() == 1 && sameName.get(0).getNumberOfParameters() == parameterCount) {
+                    found.add(sameName.get(0));
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("RenameRefactoring", "Could not inspect subtypes of "
+                    + declaringType.getFullyQualifiedName() + ": " + e);
+        }
+        return found;
+    }
+
+    /**
+     * Message for overrides that are still named {@code oldName} — the caller must be able to
+     * see from the response alone what is broken and what to do about it.
+     */
+    private static String unrenamedOverridesMessage(String oldName, String newName, List<String> leftovers) {
+        return "Rename applied to the declaration and its callers, but " + leftovers.size()
+                + " overriding method(s) still use the old name '" + oldName + "': "
+                + String.join(", ", leftovers) + ". This is a known Eclipse JDT limitation with "
+                + "generic type parameters (issue #29): the override is not recognised as related to "
+                + "the renamed declaration, and renaming it separately failed as well. The affected "
+                + "files most likely do not compile now — rename each listed method to '" + newName
+                + "' by hand and check the result with jdt_get_compilation_errors.";
     }
 
     /**
