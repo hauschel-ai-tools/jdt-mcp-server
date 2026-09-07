@@ -24,6 +24,7 @@ import org.eclipse.jdt.core.search.SearchMatch;
 import org.eclipse.jdt.core.search.SearchParticipant;
 import org.eclipse.jdt.core.search.SearchRequestor;
 import org.eclipse.jdt.core.search.TypeNameMatchRequestor;
+import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -179,7 +180,7 @@ public class NavigationTools {
 
             return found[0];
         } catch (Exception e) {
-            org.naturzukunft.jdt.mcp.McpLogger.warn("NavigationTools",
+            McpLogger.warn("NavigationTools",
                     "Search index readiness probe failed: " + e.getMessage());
             return true; // On error, let the actual search proceed
         }
@@ -502,7 +503,7 @@ public class NavigationTools {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding type: " + e.getMessage());
+            McpLogger.error("NavigationTools", "Error finding type: " + e.getMessage());
         }
         return null;
     }

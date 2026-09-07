@@ -16,6 +16,7 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.ltk.core.refactoring.Change;
 import org.eclipse.ltk.core.refactoring.CompositeChange;
 import org.eclipse.ltk.core.refactoring.RefactoringStatus;
+import org.naturzukunft.jdt.mcp.McpLogger;
 
 /**
  * Shared utility methods for refactoring tools.
@@ -124,7 +125,7 @@ class RefactoringSupport {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[JDT MCP] Error finding element: " + e.getMessage());
+            McpLogger.error("RefactoringSupport", "Error finding element: " + e.getMessage());
         }
         return null;
     }
