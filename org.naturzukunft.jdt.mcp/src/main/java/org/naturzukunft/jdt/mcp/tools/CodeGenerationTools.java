@@ -17,12 +17,14 @@ import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.Signature;
 import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
+import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
-import org.eclipse.jdt.core.dom.TypeDeclaration;
+import org.eclipse.jdt.core.dom.FieldDeclaration;
+import org.eclipse.jdt.core.dom.NodeFinder;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
-import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.TextEdit;
 import org.naturzukunft.jdt.mcp.McpLogger;
 import org.naturzukunft.jdt.mcp.McpServerManager.ToolRegistration;
@@ -196,14 +198,8 @@ public class CodeGenerationTools {
 
             methodSource.append("    }\n");
 
-            // Insert method before the closing brace of the class
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                String newSource = source.substring(0, lastBrace) + methodSource.toString() + "\n" + source.substring(lastBrace);
-                cu.getBuffer().setContents(newSource);
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert method into the class body via AST-based rewriting
+            insertMembers(type, cu, methodSource.toString(), false);
 
             // Build result
             Map<String, Object> result = new HashMap<>();
@@ -813,14 +809,8 @@ public class CodeGenerationTools {
                     generatedMethods.add(sig.toString());
                 }
 
-                // Insert methods before the closing brace
-                String source = cu.getSource();
-                int lastBrace = source.lastIndexOf('}');
-                if (lastBrace > 0) {
-                    String newSource = source.substring(0, lastBrace) + methodsSource.toString() + "\n" + source.substring(lastBrace);
-                    cu.getBuffer().setContents(newSource);
-                    cu.save(new NullProgressMonitor(), true);
-                }
+                // Insert method stubs into the class body via AST-based rewriting
+                insertMembers(type, cu, methodsSource.toString(), false);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -1009,14 +999,8 @@ public class CodeGenerationTools {
                 return new CallToolResult("All getters/setters already exist", false);
             }
 
-            // Insert methods before the closing brace of the class
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                String newSource = source.substring(0, lastBrace) + methodsToAdd.toString() + "\n" + source.substring(lastBrace);
-                cu.getBuffer().setContents(newSource);
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert methods into the class body via AST-based rewriting
+            insertMembers(type, cu, methodsToAdd.toString(), false);
 
             Map<String, Object> result = new HashMap<>();
             result.put("status", "SUCCESS");
@@ -1140,21 +1124,8 @@ public class CodeGenerationTools {
                 return new CallToolResult("No constructors to generate", false);
             }
 
-            // Insert constructors
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                // Try to insert after field declarations
-                int insertPos = findInsertPositionAfterFields(type, source);
-                if (insertPos > 0 && insertPos < lastBrace) {
-                    String newSource = source.substring(0, insertPos) + constructorsToAdd.toString() + source.substring(insertPos);
-                    cu.getBuffer().setContents(newSource);
-                } else {
-                    String newSource = source.substring(0, lastBrace) + constructorsToAdd.toString() + "\n" + source.substring(lastBrace);
-                    cu.getBuffer().setContents(newSource);
-                }
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert constructors after existing field declarations via AST-based rewriting
+            insertMembers(type, cu, constructorsToAdd.toString(), true);
 
             Map<String, Object> result = new HashMap<>();
             result.put("status", "SUCCESS");
@@ -1276,14 +1247,8 @@ public class CodeGenerationTools {
             methodsToAdd.append(");\n    }\n");
             generatedMethods.add("hashCode()");
 
-            // Insert methods
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                String newSource = source.substring(0, lastBrace) + methodsToAdd.toString() + "\n" + source.substring(lastBrace);
-                cu.getBuffer().setContents(newSource);
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert methods into the class body via AST-based rewriting
+            insertMembers(type, cu, methodsToAdd.toString(), false);
 
             Map<String, Object> result = new HashMap<>();
             result.put("status", "SUCCESS");
@@ -1384,14 +1349,8 @@ public class CodeGenerationTools {
             method.append("            \"}\";\n")
                     .append("    }\n");
 
-            // Insert method
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                String newSource = source.substring(0, lastBrace) + method.toString() + "\n" + source.substring(lastBrace);
-                cu.getBuffer().setContents(newSource);
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert method into the class body via AST-based rewriting
+            insertMembers(type, cu, method.toString(), false);
 
             Map<String, Object> result = new HashMap<>();
             result.put("status", "SUCCESS");
@@ -1549,14 +1508,8 @@ public class CodeGenerationTools {
                 generatedMethods.add(methodName + "(" + params + ")");
             }
 
-            // Insert methods
-            String source = cu.getSource();
-            int lastBrace = source.lastIndexOf('}');
-            if (lastBrace > 0) {
-                String newSource = source.substring(0, lastBrace) + methodsToAdd.toString() + "\n" + source.substring(lastBrace);
-                cu.getBuffer().setContents(newSource);
-                cu.save(new NullProgressMonitor(), true);
-            }
+            // Insert methods into the class body via AST-based rewriting
+            insertMembers(type, cu, methodsToAdd.toString(), false);
 
             Map<String, Object> result = new HashMap<>();
             result.put("status", "SUCCESS");
@@ -1593,26 +1546,71 @@ public class CodeGenerationTools {
     }
 
     /**
-     * Helper: Find position after field declarations.
+     * Helper: Insert generated member source (methods, constructors, ...) into a type's body
+     * using AST-based structural rewriting instead of raw string/offset manipulation
+     * (see issue #52: {@code source.lastIndexOf('}')} breaks on inner classes, comments
+     * containing {@code '}'}, and similar edge cases).
+     *
+     * @param afterFields if {@code true}, insert right after the last field declaration
+     *                    (falling back to the start of the body if there are no fields);
+     *                    if {@code false}, append as the last body declaration.
      */
-    private static int findInsertPositionAfterFields(IType type, String source) {
-        try {
-            IField[] fields = type.getFields();
-            if (fields.length > 0) {
-                ISourceRange lastFieldRange = fields[fields.length - 1].getSourceRange();
-                return lastFieldRange.getOffset() + lastFieldRange.getLength() + 1;
-            }
-            // If no fields, insert after class declaration opening brace
-            ISourceRange typeRange = type.getSourceRange();
-            int classStart = typeRange.getOffset();
-            int bracePos = source.indexOf('{', classStart);
-            if (bracePos > 0) {
-                return bracePos + 1;
-            }
-        } catch (Exception e) {
-            // Ignore
+    private static void insertMembers(IType type, ICompilationUnit cu, String memberSource, boolean afterFields)
+            throws Exception {
+        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        parser.setSource(cu);
+        parser.setResolveBindings(false);
+        CompilationUnit astRoot = (CompilationUnit) parser.createAST(new NullProgressMonitor());
+
+        AbstractTypeDeclaration typeDecl = findTypeDeclaration(astRoot, type);
+        if (typeDecl == null) {
+            throw new IllegalStateException(
+                    "Could not locate AST declaration for type " + type.getFullyQualifiedName());
         }
-        return -1;
+
+        ASTRewrite rewrite = ASTRewrite.create(astRoot.getAST());
+        ListRewrite listRewrite = rewrite.getListRewrite(typeDecl, typeDecl.getBodyDeclarationsProperty());
+        ASTNode placeholder = rewrite.createStringPlaceholder(memberSource, ASTNode.METHOD_DECLARATION);
+
+        if (afterFields) {
+            FieldDeclaration lastField = null;
+            for (Object decl : typeDecl.bodyDeclarations()) {
+                if (decl instanceof FieldDeclaration field) {
+                    lastField = field;
+                }
+            }
+            if (lastField != null) {
+                listRewrite.insertAfter(placeholder, lastField, null);
+            } else {
+                listRewrite.insertFirst(placeholder, null);
+            }
+        } else {
+            listRewrite.insertLast(placeholder, null);
+        }
+
+        TextEdit edit = rewrite.rewriteAST();
+        ICompilationUnit workingCopy = cu.getWorkingCopy(new NullProgressMonitor());
+        try {
+            workingCopy.applyTextEdit(edit, new NullProgressMonitor());
+            workingCopy.commitWorkingCopy(true, new NullProgressMonitor());
+        } finally {
+            workingCopy.discardWorkingCopy();
+        }
+    }
+
+    /**
+     * Helper: Locate the AST declaration matching an {@link IType} by its name range offset,
+     * walking up the AST from that position instead of relying on file-wide string search.
+     */
+    private static AbstractTypeDeclaration findTypeDeclaration(CompilationUnit astRoot, IType type)
+            throws Exception {
+        ISourceRange nameRange = type.getNameRange();
+        ASTNode node = NodeFinder.perform(astRoot, nameRange.getOffset(), nameRange.getLength());
+        while (node != null && !(node instanceof AbstractTypeDeclaration)) {
+            node = node.getParent();
+        }
+        return (AbstractTypeDeclaration) node;
     }
 
     /**
