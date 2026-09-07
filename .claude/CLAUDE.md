@@ -42,6 +42,7 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 
 - Modul-Build: `mvn -pl org.naturzukunft.jdt.mcp -am compile` (mit obigen `MAVEN_OPTS`)
 - `tests/smoke-test.sh` und `tests/lifecycle-test.sh` gegen das gebaute Produkt
+- `tests/refactoring-test.sh` als E2E-Test für Refactorings (importiert die Fixtures und prüft Assertions auf Disk, nicht nur die Tool-Antwort)
 - Produkt-Build (`package`) einmal am Ende eines Arbeitspakets, nicht nach jedem Edit
 
 ## Git
