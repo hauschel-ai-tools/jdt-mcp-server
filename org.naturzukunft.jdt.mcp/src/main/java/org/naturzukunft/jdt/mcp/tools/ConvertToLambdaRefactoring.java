@@ -70,7 +70,8 @@ class ConvertToLambdaRefactoring {
                 "Convert an anonymous inner class to a lambda expression. " +
                 "Works for single-method interfaces (functional interfaces). " +
                 "IMPORTANT: The offset must be INSIDE the anonymous class body (e.g., inside the method implementation), " +
-                "NOT at the 'new' keyword. Use jdt_parse_java_file to find the correct offset within the anonymous class.",
+                "NOT at the 'new' keyword. Use jdt_parse_java_file to find the correct offset within the anonymous class. " +
+                "⚠️ SEQUENTIAL ONLY: Do NOT call multiple refactoring tools in parallel.",
                 schema,
                 null);
 

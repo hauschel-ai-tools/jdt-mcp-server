@@ -290,14 +290,17 @@ public class McpProtocolHandler {
             McpLogger.debug("Protocol", "Returning result with " + contentList.size() + " content items");
             return result;
 
-        } catch (Exception e) {
-            McpLogger.error("Protocol", "Tool " + toolName + " threw exception", e);
+        } catch (Throwable t) {
+            // Throwable, not Exception: JDT throws Errors headless (e.g.
+            // NoClassDefFoundError for jdt.ui classes). An Error escaping here would
+            // kill the stdio reader thread and with it the whole server session.
+            McpLogger.error("Protocol", "Tool " + toolName + " threw " + t.getClass().getSimpleName(), t);
 
             Map<String, Object> result = new HashMap<>();
             List<Map<String, Object>> content = new ArrayList<>();
             Map<String, Object> textContent = new HashMap<>();
             textContent.put("type", "text");
-            textContent.put("text", "Error: " + e.getMessage());
+            textContent.put("text", "Error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             content.add(textContent);
             result.put("content", content);
             result.put("isError", true);
