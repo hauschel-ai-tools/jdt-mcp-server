@@ -12,6 +12,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
@@ -734,6 +736,11 @@ public class ExecutionTools {
                 return new CallToolResult("Not a Java project: " + projectName, true);
             }
 
+            TestKindDetection testKindDetection = detectTestKind(javaProject);
+            if (testKindDetection.errorMessage() != null) {
+                return new CallToolResult(testKindDetection.errorMessage(), true);
+            }
+
             // Find the test type
             IType testType = null;
 
@@ -819,7 +826,7 @@ public class ExecutionTools {
             // Configure the launch
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, projectName);
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, fullyQualifiedName);
-            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", "org.eclipse.jdt.junit.loader.junit5");
+            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", testKindDetection.testKindId());
 
             // Set working directory to project root - important for Spring Boot to find application.properties
             String projectPath = project.getLocation().toOSString();
@@ -1083,7 +1090,10 @@ public class ExecutionTools {
                 if (!completed) {
                     result.put("status", "TIMEOUT");
                     String message = "Tests timed out after " + timeoutSeconds + " seconds.";
-                    if (!sessionState[0]) {
+                    String platformMismatchHint = detectJUnitPlatformMismatch(processOutput);
+                    if (platformMismatchHint != null) {
+                        message += " " + platformMismatchHint;
+                    } else if (!sessionState[0]) {
                         message += " Test session never launched.";
                     } else if (!sessionState[1]) {
                         message += " Test session launched but never started - this may indicate a Spring context initialization issue.";
@@ -1223,6 +1233,118 @@ public class ExecutionTools {
     /**
      * Detects if a test class is a Spring Boot integration test by checking for common annotations.
      */
+    /**
+     * Matches JUnit Jupiter/Platform/Vintage module jars, e.g. {@code junit-jupiter-api-5.11.4.jar}
+     * or {@code junit-platform-commons-6.0.0.jar}. Group 2 is the module's major version: for the
+     * JUnit 5 line, Jupiter/Vintage carry major {@code 5} while Platform itself carries major
+     * {@code 1}; JUnit 6 unified all module versions onto major {@code 6}.
+     */
+    private static final Pattern JUNIT_MODULE_JAR_PATTERN = Pattern.compile(
+            "(junit-jupiter[\\w-]*|junit-platform[\\w-]*|junit-vintage[\\w-]*)-(\\d+)\\.");
+
+    /** Matches the classic {@code junit:junit} JUnit 4 jar, e.g. {@code junit-4.13.2.jar}. */
+    private static final Pattern JUNIT4_JAR_PATTERN = Pattern.compile("^junit-4\\.\\d");
+
+    private static final int JUNIT6_MAJOR_VERSION = 6;
+
+    /**
+     * Result of {@link #detectTestKind(IJavaProject)}: either a resolved
+     * {@code org.eclipse.jdt.junit.TEST_KIND} id, or a self-explanatory error message.
+     */
+    private record TestKindDetection(String testKindId, String errorMessage) {
+        static TestKindDetection of(String testKindId) {
+            return new TestKindDetection(testKindId, null);
+        }
+
+        static TestKindDetection failure(String errorMessage) {
+            return new TestKindDetection(null, errorMessage);
+        }
+    }
+
+    /**
+     * Detects which JUnit test kind (junit4/junit5/junit6) the JUnit launch configuration should
+     * use, based on the JUnit module jars found on the project's resolved classpath. The bundled
+     * product ships loaders for all three kinds (org.eclipse.jdt.junit4/5/6.runtime), so the
+     * launch configuration must match whatever the project actually depends on.
+     *
+     * @param javaProject the Java project whose classpath is inspected
+     * @return the detected test kind, or a self-explanatory error message if none could be determined
+     */
+    private static TestKindDetection detectTestKind(IJavaProject javaProject) {
+        try {
+            boolean hasJUnit4 = false;
+            boolean hasJUnit5PlatformModule = false;
+
+            for (IClasspathEntry entry : javaProject.getResolvedClasspath(true)) {
+                if (entry.getEntryKind() != IClasspathEntry.CPE_LIBRARY) {
+                    continue;
+                }
+                String jarName = entry.getPath().lastSegment();
+                if (jarName == null) {
+                    continue;
+                }
+
+                Matcher moduleMatcher = JUNIT_MODULE_JAR_PATTERN.matcher(jarName);
+                if (moduleMatcher.find()) {
+                    int majorVersion = Integer.parseInt(moduleMatcher.group(2));
+                    if (majorVersion >= JUNIT6_MAJOR_VERSION) {
+                        return TestKindDetection.of("org.eclipse.jdt.junit.loader.junit6");
+                    }
+                    hasJUnit5PlatformModule = true;
+                    continue;
+                }
+
+                if (JUNIT4_JAR_PATTERN.matcher(jarName).find()) {
+                    hasJUnit4 = true;
+                }
+            }
+
+            if (hasJUnit5PlatformModule) {
+                return TestKindDetection.of("org.eclipse.jdt.junit.loader.junit5");
+            }
+            if (hasJUnit4) {
+                return TestKindDetection.of("org.eclipse.jdt.junit.loader.junit4");
+            }
+
+            return TestKindDetection.failure(
+                    "Cannot determine the JUnit test kind for project '" + javaProject.getElementName()
+                            + "': no JUnit dependency found on its resolved classpath. Add a JUnit dependency "
+                            + "(JUnit 4: junit:junit:4.x, JUnit 5: org.junit.jupiter:junit-jupiter:5.x, or "
+                            + "JUnit 6: org.junit.jupiter:junit-jupiter:6.x) to the project's build file "
+                            + "(pom.xml/build.gradle), then re-run jdt_import_project so the classpath is refreshed.");
+        } catch (Exception e) {
+            return TestKindDetection.failure(
+                    "Failed to inspect the classpath of project '" + javaProject.getElementName()
+                            + "' while determining the JUnit test kind: " + e.getMessage()
+                            + ". Verify the project imported successfully (jdt_import_project) and retry.");
+        }
+    }
+
+    /**
+     * Detects whether a hung/timed-out test run was actually caused by a JUnit Platform version
+     * mismatch between the project's dependencies and the bundled Eclipse JDT junit5.runtime
+     * loader (which requires a newer JUnit Platform API, e.g. {@code
+     * org.junit.platform.engine.OutputDirectoryCreator}, than JUnit Platform 1.x provides). In
+     * that case the launched test JVM crashes with a {@code NoClassDefFoundError} before the
+     * JUnit listener ever fires, which otherwise surfaces only as a generic timeout. See #71.
+     *
+     * @param processOutput captured stdout/stderr of the launched test JVM, may be empty
+     * @return a self-explanatory hint if the mismatch was detected, otherwise {@code null}
+     */
+    private static String detectJUnitPlatformMismatch(String processOutput) {
+        if (processOutput == null || processOutput.isEmpty()) {
+            return null;
+        }
+        if (processOutput.contains("NoClassDefFoundError: org/junit/platform")
+                || processOutput.contains("ClassNotFoundException: org.junit.platform")) {
+            return "This looks like a JUnit Platform version mismatch: the bundled JUnit 5 test runner "
+                    + "requires a newer JUnit Platform than the project's dependency provides. JUnit "
+                    + "Platform 1.x is not supported; upgrade the project to JUnit 6 "
+                    + "(org.junit.jupiter:junit-jupiter:6.x) or run the tests via Maven/Gradle instead.";
+        }
+        return null;
+    }
+
     private static boolean detectIntegrationTest(IType testType) {
         try {
             // Check for Spring Boot test annotations
@@ -1436,6 +1558,13 @@ public class ExecutionTools {
                 return;
             }
 
+            TestKindDetection testKindDetection = detectTestKind(javaProject);
+            if (testKindDetection.errorMessage() != null) {
+                session.setErrorMessage(testKindDetection.errorMessage());
+                session.complete(AsyncTestRegistry.TestSession.Status.ERROR);
+                return;
+            }
+
             // Find test class
             String className = session.getClassName();
             IType testType = javaProject.findType(className);
@@ -1485,7 +1614,7 @@ public class ExecutionTools {
 
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_PROJECT_NAME, session.getProjectName());
             workingCopy.setAttribute(IJavaLaunchConfigurationConstants.ATTR_MAIN_TYPE_NAME, finalTestType.getFullyQualifiedName());
-            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", "org.eclipse.jdt.junit.loader.junit5");
+            workingCopy.setAttribute("org.eclipse.jdt.junit.TEST_KIND", testKindDetection.testKindId());
 
             if (session.getMethodName() != null) {
                 workingCopy.setAttribute("org.eclipse.jdt.junit.TESTNAME", session.getMethodName());
