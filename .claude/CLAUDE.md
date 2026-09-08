@@ -47,7 +47,9 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 
 ## Git
 
-- Repository: https://github.com/hauschel-ai-tools/jdt-mcp-server
+- Repository: https://github.com/hauschel-ai-tools/jdt-mcp-server (Original seit 09/2026; das frühere Forgejo-Repo ist Archiv)
+- Issues und PRs über `gh` gegen dieses Repo. Der Forgejo-MCP-Server gehört zu anderen Projekten, nicht zu diesem.
+- Release: annotierten Tag `vX.Y.Z` auf `main` pushen. GitHub Actions baut, testet und erstellt das Release mit allen Plattform-Archiven. Kein `tea`, kein `/forgejo-release`.
 
 ## Projektstruktur
 
