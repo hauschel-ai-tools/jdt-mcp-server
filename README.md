@@ -357,7 +357,6 @@ pkill -CONT -f jdtmcp.headless; pkill -TERM -f jdtmcp.headless
 | Projekte mit JUnit Platform 1.x (JUnit 5) schlagen bei `jdt_run_tests`/`jdt_start_tests_async` fehl | `jdt_run_tests`, `jdt_start_tests_async` | `NoClassDefFoundError: org/junit/platform/engine/OutputDirectoryCreator` im gebündelten JUnit5-Runner — dessen Eclipse-JDT-Loader-Version erwartet eine neuere JUnit-Platform-API als 1.x liefert. JUnit Platform 1.x wird daher nicht unterstützt; auf JUnit 6 heben. JUnit 4 und JUnit 6 werden automatisch am Projekt-Classpath erkannt und funktionieren. Workaround für JUnit 5: `jdt_maven_build(goals="test")` | [#71](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/71) |
 | Unbenutzte package-private Felder werden nicht erkannt | `jdt_find_unused_code` | JDT erkennt nur unbenutzte private Members, nicht package-private | [#72](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/72) |
 | `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus | [#81](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/81) |
-| `jdt_implement_interface`: implements-Klausel wird per String eingefügt statt ASTRewrite | `jdt_implement_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen | [#101](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/101) |
 
 ## Entwicklung
 
@@ -385,6 +384,14 @@ Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-external
 
 ```bash
 tests/refactoring-test.sh [path/to/jdt-mcp-binary]
+```
+
+### Code-Generierungs-Tests (End-to-End)
+
+Importieren `tests/fixtures/fixture-parent` und lassen `jdt_implement_interface` auf Deklarations-Köpfe los, die eine reine Textsuche aushebeln (Record mit Komponentenliste, `sealed`-Klasse mit `permits`, Kommentar mit `{` im Kopf, verschachtelte Generics in einer bestehenden `implements`-Liste). Geprüft wird die Datei **auf der Festplatte**, anschließend wird sie mit `javac` übersetzt:
+
+```bash
+tests/codegen-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ### Compiler-Compliance-Test (End-to-End)
