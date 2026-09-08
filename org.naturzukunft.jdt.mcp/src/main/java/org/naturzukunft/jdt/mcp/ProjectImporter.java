@@ -561,9 +561,10 @@ public class ProjectImporter {
      * then adds project entries to the classpath (replacing any matching JAR entries).
      */
     public static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
-        Map<String, IProject> artifactToProject = mapArtifactIdsToProjects(projects);
+        WorkspaceMavenModules modules = mapMavenModules(projects);
+        Map<String, IProject> artifactToProject = modules.projectsByArtifactId();
 
-        if (artifactToProject.size() < 2) {
+        if (modules.size() < 2) {
             return; // Nothing to wire up
         }
 
@@ -603,8 +604,8 @@ public class ProjectImporter {
                 // Strategy 1: Replace matching JAR entries with project entries
                 for (IClasspathEntry entry : existing) {
                     if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
-                        String jarName = entry.getPath().lastSegment();
-                        IProject matchedProject = findMatchingWorkspaceProject(jarName, artifactToProject, project);
+                        IProject matchedProject = findMatchingWorkspaceProject(
+                                entry.getPath().toOSString(), modules, project);
                         if (matchedProject != null) {
                             if (knownProjectRefs.contains(matchedProject.getName())) {
                                 // The workspace project is already on the classpath; this JAR is
@@ -679,11 +680,24 @@ public class ProjectImporter {
     }
 
     /**
-     * Maps the Maven artifactId of every given project to the project itself. Projects
-     * without a readable {@code pom.xml} are skipped.
+     * The Maven modules open in the workspace, indexed by artifactId: the project itself and
+     * its groupId (which is {@code null} when the POM chain did not yield one).
      */
-    public static Map<String, IProject> mapArtifactIdsToProjects(Collection<IProject> projects) {
-        Map<String, IProject> artifactToProject = new HashMap<>();
+    public record WorkspaceMavenModules(Map<String, IProject> projectsByArtifactId,
+            Map<String, String> groupIdsByArtifactId) {
+
+        public int size() {
+            return projectsByArtifactId.size();
+        }
+    }
+
+    /**
+     * Indexes the Maven modules among the given projects by artifactId. Projects without a
+     * readable {@code pom.xml} are skipped.
+     */
+    public static WorkspaceMavenModules mapMavenModules(Collection<IProject> projects) {
+        Map<String, IProject> projectsByArtifactId = new HashMap<>();
+        Map<String, String> groupIdsByArtifactId = new HashMap<>();
         for (IProject project : projects) {
             if (project.getLocation() == null) {
                 continue;
@@ -692,28 +706,32 @@ public class ProjectImporter {
             if (Files.exists(pomFile)) {
                 String artifactId = readMavenArtifactId(pomFile);
                 if (artifactId != null) {
-                    artifactToProject.put(artifactId, project);
+                    projectsByArtifactId.put(artifactId, project);
+                    groupIdsByArtifactId.put(artifactId, readMavenGroupId(pomFile));
                 }
             }
         }
-        return artifactToProject;
+        return new WorkspaceMavenModules(projectsByArtifactId, groupIdsByArtifactId);
     }
 
     /**
-     * Returns the workspace project a JAR from the local Maven repository is the build output
-     * of, or {@code null} for a JAR that belongs to no workspace project. E.g.,
-     * "culinarygraph-rdf-api-0.0.1-SNAPSHOT.jar" matches the project with artifactId
-     * "culinarygraph-rdf-api". The project {@code self} never matches its own JAR.
+     * Returns the workspace project a JAR resolved from the local Maven repository is the
+     * build output of, or {@code null} for a JAR that belongs to no workspace project. Takes
+     * the full path, not just the file name: inside the repository layout the path carries
+     * groupId and artifactId, which keeps a foreign artifact with a colliding artifactId
+     * ({@code core}, {@code common}, {@code utils}) from being mistaken for a workspace
+     * module. The project {@code self} never matches its own JAR.
      *
      * @see WorkspaceArtifactMatcher
      */
-    public static IProject findMatchingWorkspaceProject(String jarName,
-            Map<String, IProject> artifactToProject, IProject self) {
-        String artifactId = WorkspaceArtifactMatcher.matchArtifactId(jarName, artifactToProject.keySet());
+    public static IProject findMatchingWorkspaceProject(String jarPath,
+            WorkspaceMavenModules modules, IProject self) {
+        String artifactId = WorkspaceArtifactMatcher.matchArtifactId(jarPath,
+                modules.groupIdsByArtifactId());
         if (artifactId == null) {
             return null;
         }
-        IProject matched = artifactToProject.get(artifactId);
+        IProject matched = modules.projectsByArtifactId().get(artifactId);
         return matched == null || matched.equals(self) ? null : matched;
     }
 
@@ -737,6 +755,46 @@ public class ProjectImporter {
             }
         } catch (Exception e) {
             McpLogger.warn("ProjectImporter", "Could not read artifactId from " + pomFile + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Reads the groupId of a Maven pom.xml: the direct child &lt;groupId&gt; if present,
+     * otherwise the one inherited from &lt;parent&gt; (the common case in a reactor, where
+     * modules declare only their artifactId). Returns {@code null} when neither is there.
+     */
+    private static String readMavenGroupId(Path pomFile) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(pomFile.toFile());
+
+            Element parent = null;
+            NodeList children = doc.getDocumentElement().getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                if (children.item(i) instanceof Element el) {
+                    if ("groupId".equals(el.getTagName())) {
+                        return el.getTextContent().trim();
+                    }
+                    if ("parent".equals(el.getTagName())) {
+                        parent = el;
+                    }
+                }
+            }
+
+            if (parent != null) {
+                NodeList parentChildren = parent.getChildNodes();
+                for (int i = 0; i < parentChildren.getLength(); i++) {
+                    if (parentChildren.item(i) instanceof Element el
+                            && "groupId".equals(el.getTagName())) {
+                        return el.getTextContent().trim();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter", "Could not read groupId from " + pomFile + ": " + e.getMessage());
         }
         return null;
     }

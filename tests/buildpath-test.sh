@@ -13,8 +13,17 @@
 # The #116 assertions read the .classpath ON DISK, not the tool response: the response was
 # green while the classpath had two entries for the same module.
 #
-# Requires: bash, jq, mkfifo, mvn (the server shells out to 'mvn dependency:build-classpath',
-# and the fixture siblings have to be installed into ~/.m2 for Maven to resolve them at all).
+# LOCAL MAVEN REPOSITORY: the #116 scenario only arises when the reactor siblings are
+# resolvable as JARs, so the fixture modules are installed with their real coordinates
+# (org.fixture:*:1.0.0-SNAPSHOT) into the local repository. Any pre-existing org/fixture tree
+# is moved aside first and restored on exit; artifacts installed by this run are removed
+# again, so the repository is left as it was found. Set M2_REPO to point at a different local
+# repository.
+#
+# NO NETWORK: if the install fails, the #116 tests are skipped instead of failing the suite -
+# nothing about the server is broken then. Set JDTMCP_REQUIRE_MAVEN=1 to make it an error.
+#
+# Requires: bash, jq, mkfifo, mvn (the server shells out to 'mvn dependency:build-classpath')
 #
 # Usage:  tests/buildpath-test.sh [path/to/jdt-mcp-binary]
 #         If no binary is given, the script searches the build output.
@@ -81,10 +90,36 @@ APP_CLASSPATH="$PARENT_DIR/fixture-app/.classpath"
 
 SERVER_LOG="$HOME/.jdt-mcp/jdt-mcp-$(basename "$SERVER_CWD").log"
 
+M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
+FIXTURE_ARTIFACTS_DIR="$M2_REPO/org/fixture"
+FIXTURE_ARTIFACTS_PREEXISTING=0
+M2_BACKUP=""
+MAVEN_FIXTURES_AVAILABLE=0
+
 echo "Fixtures at: $FIXTURE_WORK_DIR"
+
+# Leaves the local repository exactly as the script found it.
+restore_local_repository() {
+    if [ "$FIXTURE_ARTIFACTS_PREEXISTING" = "1" ]; then
+        if [ -n "$M2_BACKUP" ] && [ -d "$M2_BACKUP/org-fixture" ]; then
+            rm -rf "$FIXTURE_ARTIFACTS_DIR"
+            mkdir -p "$(dirname "$FIXTURE_ARTIFACTS_DIR")"
+            mv "$M2_BACKUP/org-fixture" "$FIXTURE_ARTIFACTS_DIR"
+            echo "Restored the pre-existing org.fixture artifacts in $M2_REPO"
+        fi
+    elif [ -d "$FIXTURE_ARTIFACTS_DIR" ]; then
+        rm -rf "$FIXTURE_ARTIFACTS_DIR"
+        echo "Removed the org.fixture artifacts installed by this run from $M2_REPO"
+    fi
+    if [ -n "$M2_BACKUP" ] && [ -d "$M2_BACKUP" ]; then
+        rm -rf "$M2_BACKUP"
+    fi
+    return 0
+}
 
 cleanup_all() {
     cleanup
+    restore_local_repository
     [ -d "$FIXTURE_WORK_DIR" ] && rm -rf "$FIXTURE_WORK_DIR"
     [ -d "$SERVER_CWD" ] && rm -rf "$SERVER_CWD"
     [ -f "$RPC_ID_FILE" ] && rm -f "$RPC_ID_FILE"
@@ -92,20 +127,34 @@ cleanup_all() {
 }
 trap cleanup_all EXIT
 
-# ── Install the reactor siblings into ~/.m2 ───────────────────────────────────
+# ── Install the reactor siblings into the local Maven repository ──────────────
 # Without this 'mvn dependency:build-classpath' fails for fixture-app and the whole #116
 # scenario (sibling resolved to a JAR) cannot arise. fixture-broken is left out on purpose:
 # it has deliberate compile errors and would fail the install.
 
 echo ""
-echo "Installing fixture-api and fixture-core into the local Maven repository..."
-if ! mvn -q -B -f "$PARENT_DIR/pom.xml" -pl fixture-api,fixture-core -am \
-        -DskipTests install > "$FIXTURE_WORK_DIR/mvn-install.log" 2>&1; then
-    echo "ERROR: 'mvn install' of the fixture siblings failed - #116 cannot be tested" >&2
-    tail -30 "$FIXTURE_WORK_DIR/mvn-install.log" >&2
-    exit 1
+echo "Installing fixture-api and fixture-core into $M2_REPO ..."
+if [ -d "$FIXTURE_ARTIFACTS_DIR" ]; then
+    FIXTURE_ARTIFACTS_PREEXISTING=1
+    M2_BACKUP="$(mktemp -d)"
+    mv "$FIXTURE_ARTIFACTS_DIR" "$M2_BACKUP/org-fixture"
+    echo "  moved pre-existing org.fixture artifacts aside (restored on exit)"
 fi
-echo "  installed"
+
+if mvn -q -B -f "$PARENT_DIR/pom.xml" -pl fixture-api,fixture-core -am \
+        -Dmaven.repo.local="$M2_REPO" -DskipTests install \
+        > "$FIXTURE_WORK_DIR/mvn-install.log" 2>&1; then
+    MAVEN_FIXTURES_AVAILABLE=1
+    echo "  installed"
+else
+    echo "  WARNING: 'mvn install' of the fixture siblings failed - no network, broken mirror?"
+    echo "  The #116 tests need resolvable sibling JARs and will be SKIPPED."
+    tail -10 "$FIXTURE_WORK_DIR/mvn-install.log" | sed 's/^/    /'
+    if [ "${JDTMCP_REQUIRE_MAVEN:-0}" = "1" ]; then
+        echo "ERROR: JDTMCP_REQUIRE_MAVEN=1 - treating the failed install as an error" >&2
+        exit 1
+    fi
+fi
 
 # ── JSON-RPC with id matching and a long timeout ──────────────────────────────
 # The helper in lib/mcp-helpers.sh returns the last stdout line, which breaks as soon as the
@@ -162,6 +211,31 @@ tool_status() {
     tool_text "$1" | jq -r '.status // empty' 2>/dev/null || true
 }
 
+compilation_errors() {
+    tool_text "$(call_tool "jdt_get_compilation_errors" "$(jq -cn --arg p "$1" '{"projectName":$p}')")"
+}
+
+# Auto-building reacts to a classpath change asynchronously, so poll instead of sleeping.
+LAST_ERRORS_JSON=""
+wait_for_error_count() {
+    local project="$1"
+    local expected="$2"
+    local timeout="${3:-90}"
+    local elapsed=0
+    local count=""
+    while [ "$elapsed" -lt "$timeout" ]; do
+        LAST_ERRORS_JSON=$(compilation_errors "$project")
+        count=$(echo "$LAST_ERRORS_JSON" | jq -r '.errorCount // -1')
+        if [ "$count" = "$expected" ]; then
+            return 0
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    echo "  (errorCount for $project stayed at ${count:-?}, expected $expected after ${timeout}s)"
+    return 1
+}
+
 # ── Classpath assertions (read the file on disk) ──────────────────────────────
 
 # Counts <classpathentry> elements of a given kind whose path matches a grep pattern.
@@ -205,14 +279,19 @@ rpc "initialize" "$init_params" > /dev/null
 send_notification "notifications/initialized"
 
 echo ""
-echo "Importing fixture-parent and fixture-badclasspath..."
-import_parent=$(call_tool "jdt_import_project" "$(jq -cn --arg p "$PARENT_DIR" '{"path":$p}')")
+echo "Importing fixtures..."
 import_badcp=$(call_tool "jdt_import_project" "$(jq -cn --arg p "$BADCP_DIR" '{"path":$p}')")
-echo "  fixture-parent:       $(tool_status "$import_parent")"
 echo "  fixture-badclasspath: $(tool_status "$import_badcp")"
 
+REQUIRED_PROJECTS="fixture-badclasspath"
+if [ "$MAVEN_FIXTURES_AVAILABLE" = "1" ]; then
+    import_parent=$(call_tool "jdt_import_project" "$(jq -cn --arg p "$PARENT_DIR" '{"path":$p}')")
+    echo "  fixture-parent:       $(tool_status "$import_parent")"
+    REQUIRED_PROJECTS="$REQUIRED_PROJECTS fixture-core fixture-app fixture-api"
+fi
+
 projects=$(tool_text "$(call_tool "jdt_list_projects" '{}')")
-for required in fixture-core fixture-app fixture-badclasspath; do
+for required in $REQUIRED_PROJECTS; do
     if ! echo "$projects" | grep -q "$required"; then
         echo "FATAL: project $required not imported - build path tests cannot run"
         echo "$projects" | head -20
@@ -226,10 +305,10 @@ echo " Running build path end-to-end tests"
 echo "════════════════════════════════════════"
 echo ""
 
-# ── Test 1: build path problems are reported, with their message (#115) ───────
+# ── Test 1-3: build path problems are reported, with their message (#115) ─────
 
 echo "Test 1: jdt_get_compilation_errors reports the missing required library (#115)"
-errors_json=$(tool_text "$(call_tool "jdt_get_compilation_errors" '{"projectName":"fixture-badclasspath"}')")
+errors_json=$(compilation_errors "fixture-badclasspath")
 
 buildpath_messages=$(echo "$errors_json" \
     | jq -r '[.errors[]?, .warnings[]?] | map(select(.kind == "BUILDPATH")) | .[].message' 2>/dev/null || true)
@@ -240,30 +319,46 @@ if echo "$buildpath_messages" | grep -qi "missing required library"; then
 else
     fail "build path problem is reported with its own message" \
          "no BUILDPATH entry mentioning 'missing required library'"
-    echo "    response: $(echo "$errors_json" | jq -c '{errorCount, buildPathProblemCount, errors: [.errors[]? | {kind, message}]}' 2>/dev/null || echo "$errors_json")"
+    echo "    response: $(echo "$errors_json" | jq -c '{errorCount, buildPathErrorCount, errors: [.errors[]? | {kind, message}]}' 2>/dev/null || echo "$errors_json")"
 fi
 
-echo "Test 2: buildPathProblemCount is reported and counted in errorCount (#115)"
-bp_count=$(echo "$errors_json" | jq -r '.buildPathProblemCount // -1')
+echo "Test 2: buildPathErrorCount explains part of errorCount (#115)"
+bp_count=$(echo "$errors_json" | jq -r '.buildPathErrorCount // -1')
 err_count=$(echo "$errors_json" | jq -r '.errorCount // -1')
 bp_errors=$(echo "$errors_json" | jq -r '[.errors[]? | select(.kind == "BUILDPATH")] | length')
-if [ "$bp_count" -ge 1 ] && [ "$err_count" -ge "$bp_errors" ] && [ "$bp_errors" -ge 1 ]; then
-    pass "buildPathProblemCount=$bp_count, errorCount=$err_count includes $bp_errors BUILDPATH error(s)"
+if [ "$bp_count" -ge 1 ] && [ "$bp_count" = "$bp_errors" ] && [ "$err_count" -ge "$bp_count" ]; then
+    pass "buildPathErrorCount=$bp_count equals the BUILDPATH entries in errors, errorCount=$err_count"
 else
-    fail "buildPathProblemCount is reported and counted in errorCount" \
-         "buildPathProblemCount=$bp_count errorCount=$err_count buildpathErrors=$bp_errors"
+    fail "buildPathErrorCount equals the number of BUILDPATH errors and is part of errorCount" \
+         "buildPathErrorCount=$bp_count errorCount=$err_count buildpathErrorsInList=$bp_errors"
 fi
 
-echo "Test 3: Java problems keep their own kind (#115)"
-java_kinds=$(echo "$errors_json" | jq -r '[.errors[]?, .warnings[]?] | map(select(.kind == "JAVA")) | length')
+echo "Test 3: every problem carries a kind, Java problems included (#115)"
+java_problems=$(echo "$errors_json" | jq -r '[.errors[]?, .warnings[]?] | map(select(.kind == "JAVA")) | length')
+without_kind=$(echo "$errors_json" | jq -r '[.errors[]?, .warnings[]?] | map(select(.kind == null)) | length')
 first_kind=$(echo "$errors_json" | jq -r '.errors[0].kind // empty')
-if [ "$first_kind" = "BUILDPATH" ] && [ "$java_kinds" -ge 0 ]; then
-    pass "build path problems are listed first, Java problems tagged kind=JAVA ($java_kinds)"
+if [ "$first_kind" = "BUILDPATH" ] && [ "$java_problems" -ge 1 ] && [ "$without_kind" = "0" ]; then
+    pass "BUILDPATH listed first, $java_problems Java problem(s) tagged kind=JAVA, none untagged"
 else
-    fail "build path problems are listed first" "errors[0].kind=$first_kind"
+    fail "every problem carries a kind and BUILDPATH is listed first" \
+         "errors[0].kind=$first_kind javaProblems=$java_problems withoutKind=$without_kind"
 fi
 
-# ── Test 4-6: reactor sibling stays a project reference (#116) ────────────────
+# ── Test 4-10: reactor siblings stay project references (#116) ────────────────
+
+if [ "$MAVEN_FIXTURES_AVAILABLE" != "1" ]; then
+    echo ""
+    for skipped in \
+        "jdt_maven_update_project keeps the sibling as a project reference" \
+        "the sibling's local-repository JAR is not on the classpath" \
+        "no 'duplicate entry' warning in the server log" \
+        "the update reports which JARs the workspace projects superseded" \
+        "a second update stays idempotent" \
+        "the sibling is still compiled from source" \
+        "a transitive sibling gets a project reference instead of vanishing"; do
+        skip "$skipped" "fixture siblings could not be installed into the local Maven repository"
+    done
+else
 
 echo ""
 echo "Test 4: jdt_maven_update_project keeps the sibling as a project reference (#116)"
@@ -283,7 +378,7 @@ else
     fail "exactly one project reference to fixture-core"
 fi
 
-echo "Test 5: the sibling's ~/.m2 JAR is not on the classpath (#116)"
+echo "Test 5: the sibling's local-repository JAR is not on the classpath (#116)"
 failed=0
 assert_entry_count "$APP_CLASSPATH" "lib" 'fixture-core-' 0 \
     "no fixture-core JAR from the local Maven repository" || failed=1
@@ -317,29 +412,73 @@ else
 fi
 
 echo "Test 8: a second update stays idempotent (#116)"
+classpath_before_second=$(cat "$APP_CLASSPATH")
 call_tool "jdt_maven_update_project" '{"projectName":"fixture-app"}' > /dev/null
-failed=0
-assert_entry_count "$APP_CLASSPATH" "src" 'path="/fixture-core"' 1 \
-    "still exactly one project reference after a second update" || failed=1
-assert_entry_count "$APP_CLASSPATH" "lib" 'fixture-core-' 0 \
-    "still no fixture-core JAR after a second update" || failed=1
-if [ "$failed" -eq 0 ]; then
-    pass "classpath unchanged by a second jdt_maven_update_project"
+if [ "$classpath_before_second" = "$(cat "$APP_CLASSPATH")" ]; then
+    pass "classpath byte-identical after a second jdt_maven_update_project"
 else
-    fail "classpath unchanged by a second jdt_maven_update_project"
+    fail "classpath byte-identical after a second jdt_maven_update_project"
+    diff <(echo "$classpath_before_second") "$APP_CLASSPATH" | sed 's/^/    /' || true
 fi
 
 echo "Test 9: the sibling is still compiled from source, not from the JAR (#116)"
-app_errors=$(tool_text "$(call_tool "jdt_get_compilation_errors" '{"projectName":"fixture-app"}')")
-app_error_count=$(echo "$app_errors" | jq -r '.errorCount // -1')
-app_bp_count=$(echo "$app_errors" | jq -r '.buildPathProblemCount // -1')
-if [ "$app_error_count" = "0" ] && [ "$app_bp_count" = "0" ]; then
-    pass "fixture-app has no compilation and no build path errors after the update"
+if wait_for_error_count "fixture-app" 0; then
+    app_bp_count=$(echo "$LAST_ERRORS_JSON" | jq -r '.buildPathErrorCount // -1')
+    if [ "$app_bp_count" = "0" ]; then
+        pass "fixture-app has no compilation and no build path errors after the update"
+    else
+        fail "fixture-app has no build path errors after the update" "buildPathErrorCount=$app_bp_count"
+    fi
 else
-    fail "fixture-app has no compilation and no build path errors after the update" \
-         "errorCount=$app_error_count buildPathProblemCount=$app_bp_count"
-    echo "$app_errors" | jq -c '[.errors[]? | {kind, message}]' | sed 's/^/    /'
+    fail "fixture-app has no compilation errors after the update"
+    echo "$LAST_ERRORS_JSON" | jq -c '[.errors[]? | {kind, message}]' | sed 's/^/    /'
 fi
+
+# Regression for the review finding on this PR: the filter used to *drop* every JAR that
+# matched a workspace project. fixture-app depends on fixture-core, which depends on
+# fixture-api -- so fixture-api is resolved transitively and is NOT in fixture-app's POM.
+# With the project reference missing, nothing added it back (setupInterProjectDependencies
+# only parses direct POM dependencies) and fixture-app stopped compiling.
+echo "Test 10: a transitive sibling gets a project reference instead of vanishing (#116)"
+sed -i '/kind="src" path="\/fixture-api"/d' "$APP_CLASSPATH"
+call_tool "jdt_refresh_project" '{"projectName":"fixture-app"}' > /dev/null
+
+precondition_ok=0
+elapsed=0
+while [ "$elapsed" -lt 60 ]; do
+    app_classpath_json=$(tool_text "$(call_tool "jdt_get_classpath" '{"projectName":"fixture-app"}')")
+    if ! echo "$app_classpath_json" | jq -r '.projectDependencies[]?.path // empty' | grep -q "fixture-api"; then
+        precondition_ok=1
+        break
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+done
+
+if [ "$precondition_ok" != "1" ]; then
+    fail "transitive sibling regression" \
+         "precondition not reached: JDT still reports fixture-api as a project dependency"
+else
+    update10=$(tool_text "$(call_tool "jdt_maven_update_project" '{"projectName":"fixture-app"}')")
+    echo "    workspaceProjectsPreferred: $(echo "$update10" | jq -c '.workspaceProjectsPreferred // []')"
+
+    failed=0
+    assert_entry_count "$APP_CLASSPATH" "src" 'path="/fixture-api"' 1 \
+        "exactly one project reference to the transitive sibling fixture-api" || failed=1
+    assert_entry_count "$APP_CLASSPATH" "src" 'path="/fixture-core"' 1 \
+        "still exactly one project reference to fixture-core" || failed=1
+    assert_entry_count "$APP_CLASSPATH" "lib" 'fixture-api-' 0 \
+        "no fixture-api JAR from the local Maven repository" || failed=1
+
+    if [ "$failed" -eq 0 ] && wait_for_error_count "fixture-app" 0; then
+        pass "transitive sibling fixture-api restored as a project reference, errorCount 0"
+    else
+        fail "transitive sibling fixture-api restored as a project reference, errorCount 0"
+        echo "$LAST_ERRORS_JSON" | jq -c '[.errors[]? | {kind, message}]' | sed 's/^/    /' || true
+    fi
+fi
+
+fi  # MAVEN_FIXTURES_AVAILABLE
 
 print_summary
 

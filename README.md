@@ -398,7 +398,9 @@ tests/codegen-test.sh [path/to/jdt-mcp-binary]
 
 ### Build-Path-Tests (End-to-End)
 
-Importieren `tests/fixtures/fixture-parent` (Reaktor-Geschwister, vorher per `mvn install` im lokalen Repository) und `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüfen, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet und `jdt_maven_update_project` das Geschwistermodul als Projektreferenz behält statt als `~/.m2`-Jar:
+Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüfen, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet und `jdt_maven_update_project` Geschwistermodule als Projektreferenz führt statt als `~/.m2`-Jar — auch transitiv aufgelöste:
+
+Die Reaktor-Geschwister müssen dafür als Jar auflösbar sein, das Skript installiert sie deshalb mit ihren echten Koordinaten (`org.fixture:*`) ins lokale Repository, sichert einen vorhandenen `org/fixture`-Baum vorher und stellt den Ausgangszustand am Ende wieder her (`M2_REPO` überschreibt den Pfad). Ohne Netz werden die `jdt_maven_update_project`-Tests übersprungen statt rot; `JDTMCP_REQUIRE_MAVEN=1` macht daraus einen harten Fehler.
 
 ```bash
 tests/buildpath-test.sh [path/to/jdt-mcp-binary]

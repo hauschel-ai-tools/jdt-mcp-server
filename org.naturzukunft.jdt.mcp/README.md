@@ -288,8 +288,10 @@ Gibt Kompilierungsfehler, Warnungen und Build-Path-Probleme zurück.
 
 Build-Path-Probleme (fehlende Library, doppelter Eintrag, Classpath-Zyklus) stehen in
 `errors`/`warnings` mit `kind: "BUILDPATH"` und zuerst in der Liste; sie zählen in
-`errorCount` mit, weil sie den Build blockieren, und stehen zusätzlich als
-`buildPathProblemCount` in der Antwort. Alles andere hat `kind: "JAVA"`.
+`errorCount` bzw. `warningCount` mit, weil sie den Build blockieren. `buildPathErrorCount`
+sagt, wie viele der `errorCount` davon Build-Path-Fehler sind — `errorCount -
+buildPathErrorCount` sind also die Java-Compile-Fehler. Build-Path-*Warnungen* zählen nur in
+`warningCount`. Alles andere hat `kind: "JAVA"`.
 
 **Parameter:**
 - `projectName` (string, required): Name des Java-Projekts
