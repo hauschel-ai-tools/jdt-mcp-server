@@ -270,7 +270,7 @@ public class ExecutionTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             // Build Maven command
@@ -328,6 +328,7 @@ public class ExecutionTools {
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
+            result.put("location", project.getLocation().toString());
             result.put("goals", goals);
             result.put("profiles", profiles);
             result.put("skipTests", skipTests);
@@ -568,7 +569,7 @@ public class ExecutionTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             IJavaProject javaProject = JavaCore.create(project);
@@ -635,6 +636,7 @@ public class ExecutionTools {
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
+            result.put("location", project.getLocation().toString());
             result.put("pattern", pattern);
             result.put("testCount", tests.size());
             result.put("tests", tests);
@@ -733,7 +735,7 @@ public class ExecutionTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             IJavaProject javaProject = JavaCore.create(project);
@@ -998,6 +1000,7 @@ public class ExecutionTools {
                     config.delete();
                     Map<String, Object> result = new HashMap<>();
                     result.put("projectName", projectName);
+                    result.put("location", project.getLocation().toString());
                     result.put("className", fullyQualifiedName);
                     result.put("status", "ERROR");
                     result.put("message", "Failed to start test process. This may indicate a classpath or configuration issue.");
@@ -1054,6 +1057,7 @@ public class ExecutionTools {
                 // Build result
                 Map<String, Object> result = new HashMap<>();
                 result.put("projectName", projectName);
+                result.put("location", project.getLocation().toString());
                 result.put("className", fullyQualifiedName);
                 result.put("methodName", methodName);
 
@@ -1652,6 +1656,7 @@ public class ExecutionTools {
                         Map<String, Object> result = new HashMap<>();
                         result.put("status", session.getTestsFailed() > 0 || session.getTestsError() > 0 ? "FAILED" : "SUCCESS");
                         result.put("projectName", session.getProjectName());
+                        result.put("location", project.getLocation().toString());
                         result.put("className", session.getClassName());
                         result.put("testsRun", session.getTestsRun());
                         result.put("passed", session.getTestsPassed());

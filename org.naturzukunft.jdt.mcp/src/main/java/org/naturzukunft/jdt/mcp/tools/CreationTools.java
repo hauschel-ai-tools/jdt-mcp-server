@@ -83,7 +83,7 @@ public class CreationTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             // Find source folder
@@ -188,7 +188,7 @@ public class CreationTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             // Find source folder
@@ -288,7 +288,7 @@ public class CreationTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             // Find source folder

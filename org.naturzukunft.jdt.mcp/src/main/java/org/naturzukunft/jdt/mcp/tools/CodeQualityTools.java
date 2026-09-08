@@ -65,7 +65,7 @@ public class CodeQualityTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             IJavaProject javaProject = JavaCore.create(project);
@@ -194,7 +194,7 @@ public class CodeQualityTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             IJavaProject javaProject = JavaCore.create(project);

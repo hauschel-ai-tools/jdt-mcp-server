@@ -244,7 +244,7 @@ public class DocumentationTools {
                 IJavaProject project = JavaCore.create(
                         ResourcesPlugin.getWorkspace().getRoot().getProject(projectName));
                 if (project == null || !project.exists()) {
-                    return new CallToolResult("Project not found: " + projectName, true);
+                    return ToolErrors.projectNotFound(projectName);
                 }
                 scope = SearchEngine.createJavaSearchScope(new IJavaElement[] { project });
             } else {

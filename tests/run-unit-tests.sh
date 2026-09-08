@@ -52,6 +52,7 @@ MAIN_SOURCES=(
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenCompilerCompliance.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenClasspathFreshness.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/WorkspaceArtifactMatcher.java"
+    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/WorkspaceProjectName.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/tools/ArgParser.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/server/ToolArgumentValidator.java"
 )
