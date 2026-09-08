@@ -76,9 +76,9 @@ class ConvertToLambdaRefactoring {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> convertToLambda(
-                (String) args.get("filePath"),
-                ((Number) args.get("offset")).intValue(),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "filePath"),
+                ArgParser.requiredInt(args, "offset"),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     @SuppressWarnings("unchecked")

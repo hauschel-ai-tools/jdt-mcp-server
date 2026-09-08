@@ -64,7 +64,7 @@ public class CodeAnalysisTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> parseJavaFile((String) args.get("filePath")));
+        return new ToolRegistration(tool, (args, progress) -> parseJavaFile(ArgParser.string(args, "filePath")));
     }
 
     private static CallToolResult parseJavaFile(String filePath) {
@@ -173,7 +173,7 @@ public class CodeAnalysisTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> getTypeHierarchy((String) args.get("className")));
+        return new ToolRegistration(tool, (args, progress) -> getTypeHierarchy(ArgParser.string(args, "className")));
     }
 
     private static CallToolResult getTypeHierarchy(String className) {
@@ -241,8 +241,8 @@ public class CodeAnalysisTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> findReferences(
-                (String) args.get("elementName"),
-                (String) args.get("elementType")));
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "elementType")));
     }
 
     private static CallToolResult findReferences(String elementName, String elementType) {
@@ -337,8 +337,8 @@ public class CodeAnalysisTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> getSourceRange(
-                (String) args.get("elementName"),
-                (String) args.get("elementType")));
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "elementType")));
     }
 
     private static CallToolResult getSourceRange(String elementName, String elementType) {

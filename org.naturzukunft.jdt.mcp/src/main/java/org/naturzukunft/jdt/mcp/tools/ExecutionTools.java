@@ -256,12 +256,12 @@ public class ExecutionTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> runMavenBuild(
-                (String) args.get("projectName"),
-                (String) args.get("goals"),
-                (String) args.get("profiles"),
-                args.get("skipTests") != null ? (Boolean) args.get("skipTests") : false,
-                args.get("offline") != null ? (Boolean) args.get("offline") : false,
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "goals"),
+                ArgParser.string(args, "profiles"),
+                ArgParser.boolOrDefault(args, "skipTests", false),
+                ArgParser.boolOrDefault(args, "offline", false),
+                ArgParser.intOrDefault(args, "timeoutSeconds", 300)));
     }
 
     private static CallToolResult runMavenBuild(String projectName, String goals, String profiles,
@@ -392,9 +392,9 @@ public class ExecutionTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> runMain(
-                (String) args.get("className"),
-                (String) args.get("args"),
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 30));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "args"),
+                ArgParser.intOrDefault(args, "timeoutSeconds", 30)));
     }
 
     private static CallToolResult runMain(String className, String cmdArgs, int timeoutSeconds) {
@@ -560,8 +560,8 @@ public class ExecutionTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> listTests(
-                (String) args.get("projectName"),
-                (String) args.get("pattern")));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "pattern")));
     }
 
     private static CallToolResult listTests(String projectName, String pattern) {
@@ -711,10 +711,10 @@ public class ExecutionTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> runTestsWithJUnit(
-                (String) args.get("projectName"),
-                (String) args.get("className"),
-                (String) args.get("methodName"),
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 120,
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "methodName"),
+                ArgParser.intOrDefault(args, "timeoutSeconds", 120),
                 progress));
     }
 
@@ -1484,10 +1484,10 @@ public class ExecutionTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> startTestsAsync(
-                (String) args.get("projectName"),
-                (String) args.get("className"),
-                (String) args.get("methodName"),
-                args.get("timeoutSeconds") != null ? ((Number) args.get("timeoutSeconds")).intValue() : 300));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "methodName"),
+                ArgParser.intOrDefault(args, "timeoutSeconds", 300)));
     }
 
     /**
@@ -1511,7 +1511,7 @@ public class ExecutionTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> getTestResult((String) args.get("taskId")));
+        return new ToolRegistration(tool, (args, progress) -> getTestResult(ArgParser.string(args, "taskId")));
     }
 
     private static CallToolResult startTestsAsync(String projectName, String className, String methodName, int timeoutSeconds) {

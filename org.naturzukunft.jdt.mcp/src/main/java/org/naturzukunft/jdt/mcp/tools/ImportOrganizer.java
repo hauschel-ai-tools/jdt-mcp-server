@@ -60,8 +60,8 @@ class ImportOrganizer {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> organizeImports(
-                (String) args.get("filePath"),
-                args.get("removeUnused") != null ? (Boolean) args.get("removeUnused") : true));
+                ArgParser.string(args, "filePath"),
+                ArgParser.boolOrDefault(args, "removeUnused", true)));
     }
 
     private static CallToolResult organizeImports(String filePath, boolean removeUnused) {

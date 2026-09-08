@@ -57,8 +57,8 @@ public class CodeQualityTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> findUnusedCode(
-                (String) args.get("projectName"),
-                args.get("scope") != null ? (String) args.get("scope") : "ALL"));
+                ArgParser.string(args, "projectName"),
+                ArgParser.stringOrDefault(args, "scope", "ALL")));
     }
 
     private static CallToolResult findUnusedCode(String projectName, String scope) {
@@ -187,7 +187,7 @@ public class CodeQualityTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> findDeadCode((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> findDeadCode(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult findDeadCode(String projectName) {
