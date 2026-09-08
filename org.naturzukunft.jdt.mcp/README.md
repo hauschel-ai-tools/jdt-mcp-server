@@ -12,7 +12,7 @@ Das Plugin stellt 11 MCP-Tools bereit:
 |------|-------------|
 | `jdt_list_projects` | Alle Java-Projekte im Workspace auflisten |
 | `jdt_get_classpath` | Classpath eines Projekts abrufen |
-| `jdt_get_compilation_errors` | Kompilierungsfehler und Warnungen |
+| `jdt_get_compilation_errors` | Kompilierungsfehler, Warnungen und Build-Path-Probleme |
 | `jdt_get_project_structure` | Projektstruktur-Übersicht |
 | `jdt_parse_java_file` | Java-Datei parsen (Package, Imports, Typen, Methoden, Felder) |
 | `jdt_get_type_hierarchy` | Typhierarchie abrufen (Superklassen, Interfaces, Subklassen) |
@@ -284,7 +284,14 @@ Gibt den aufgelösten Classpath zurück.
 
 ### jdt_get_compilation_errors
 
-Gibt Kompilierungsfehler und Warnungen zurück.
+Gibt Kompilierungsfehler, Warnungen und Build-Path-Probleme zurück.
+
+Build-Path-Probleme (fehlende Library, doppelter Eintrag, Classpath-Zyklus) stehen in
+`errors`/`warnings` mit `kind: "BUILDPATH"` und zuerst in der Liste; sie zählen in
+`errorCount` bzw. `warningCount` mit, weil sie den Build blockieren. `buildPathErrorCount`
+sagt, wie viele der `errorCount` davon Build-Path-Fehler sind — `errorCount -
+buildPathErrorCount` sind also die Java-Compile-Fehler. Build-Path-*Warnungen* zählen nur in
+`warningCount`. Alles andere hat `kind: "JAVA"`.
 
 **Parameter:**
 - `projectName` (string, required): Name des Java-Projekts

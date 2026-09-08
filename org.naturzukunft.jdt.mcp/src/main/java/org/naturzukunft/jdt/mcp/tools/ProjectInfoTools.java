@@ -2,8 +2,10 @@ package org.naturzukunft.jdt.mcp.tools;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import java.nio.file.Path;
 
@@ -12,9 +14,11 @@ import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IJavaModelMarker;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
@@ -304,6 +308,10 @@ public class ProjectInfoTools {
                 "jdt_get_compilation_errors",
                 "Get all compilation errors and warnings for a Java project. " +
                 "Returns file location, line number, and error message. " +
+                "Includes build path problems (missing required library, duplicate entry, classpath cycle), " +
+                "marked with kind=BUILDPATH and listed first; they are counted in errorCount because they " +
+                "block the build, and buildPathErrorCount says how many of errorCount they are " +
+                "(errorCount - buildPathErrorCount = Java compilation errors). Everything else has kind=JAVA. " +
                 "TIP: Call jdt_refresh_project first if you modified files externally, otherwise you may see stale errors.",
                 schema,
                 null);
@@ -318,36 +326,23 @@ public class ProjectInfoTools {
                 return new CallToolResult("Project not found: " + projectName, true);
             }
 
-            IMarker[] markers = project.findMarkers(
-                    "org.eclipse.jdt.core.problem",
-                    true,
-                    IResource.DEPTH_INFINITE);
-
             List<Map<String, Object>> errors = new ArrayList<>();
             List<Map<String, Object>> warnings = new ArrayList<>();
 
-            for (IMarker marker : markers) {
-                Map<String, Object> problem = new HashMap<>();
-                problem.put("message", marker.getAttribute(IMarker.MESSAGE, ""));
-                problem.put("file", marker.getResource().getLocation().toString());
-                problem.put("lineNumber", marker.getAttribute(IMarker.LINE_NUMBER, -1));
-                problem.put("charStart", marker.getAttribute(IMarker.CHAR_START, -1));
-                problem.put("charEnd", marker.getAttribute(IMarker.CHAR_END, -1));
-
-                int severity = marker.getAttribute(IMarker.SEVERITY, IMarker.SEVERITY_INFO);
-                if (severity == IMarker.SEVERITY_ERROR) {
-                    problem.put("severity", "ERROR");
-                    errors.add(problem);
-                } else if (severity == IMarker.SEVERITY_WARNING) {
-                    problem.put("severity", "WARNING");
-                    warnings.add(problem);
-                }
-            }
+            // Build path problems come first: they are the reason behind the generic
+            // "The project cannot be built until build path errors are resolved" Java problem,
+            // and a caller that only skims the head of the list needs to see the cause (#115).
+            // JDT keeps them under a marker type of their own, a sibling of the Java problem
+            // marker rather than a subtype, so it takes a second findMarkers call.
+            int buildPathErrorCount = collectMarkers(project, IJavaModelMarker.BUILDPATH_PROBLEM_MARKER,
+                    "BUILDPATH", errors, warnings);
+            collectMarkers(project, IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, "JAVA", errors, warnings);
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
             result.put("errorCount", errors.size());
             result.put("warningCount", warnings.size());
+            result.put("buildPathErrorCount", buildPathErrorCount);
             result.put("errors", errors);
             result.put("warnings", warnings);
 
@@ -356,6 +351,46 @@ public class ProjectInfoTools {
         } catch (Exception e) {
             return ToolErrors.errorResult("get compilation errors", e);
         }
+    }
+
+    /**
+     * Adds every error/warning marker of the given type below {@code project} to
+     * {@code errors} / {@code warnings}, tagged with {@code kind}, and returns how many of
+     * them were <em>errors</em> - the counterpart of {@code errorCount}, so that a caller can
+     * compute the number of Java errors as {@code errorCount - buildPathErrorCount}. Markers
+     * of severity INFO are ignored, as before.
+     */
+    private static int collectMarkers(IProject project, String markerType, String kind,
+            List<Map<String, Object>> errors, List<Map<String, Object>> warnings) throws CoreException {
+        int collected = 0;
+        for (IMarker marker : project.findMarkers(markerType, true, IResource.DEPTH_INFINITE)) {
+            int severity = marker.getAttribute(IMarker.SEVERITY, IMarker.SEVERITY_INFO);
+            if (severity != IMarker.SEVERITY_ERROR && severity != IMarker.SEVERITY_WARNING) {
+                continue;
+            }
+
+            Map<String, Object> problem = new HashMap<>();
+            problem.put("kind", kind);
+            problem.put("message", marker.getAttribute(IMarker.MESSAGE, ""));
+            // Build path markers sit on the project itself, which has no line information
+            IResource resource = marker.getResource();
+            problem.put("file", resource.getLocation() != null
+                    ? resource.getLocation().toString()
+                    : resource.getFullPath().toString());
+            problem.put("lineNumber", marker.getAttribute(IMarker.LINE_NUMBER, -1));
+            problem.put("charStart", marker.getAttribute(IMarker.CHAR_START, -1));
+            problem.put("charEnd", marker.getAttribute(IMarker.CHAR_END, -1));
+
+            if (severity == IMarker.SEVERITY_ERROR) {
+                problem.put("severity", "ERROR");
+                errors.add(problem);
+                collected++;
+            } else {
+                problem.put("severity", "WARNING");
+                warnings.add(problem);
+            }
+        }
+        return collected;
     }
 
     /**
@@ -523,31 +558,71 @@ public class ProjectInfoTools {
                 return new CallToolResult("Not a Maven project (no pom.xml): " + projectName, true);
             }
 
-            // Resolve new Maven dependencies
-            List<IClasspathEntry> mavenEntries = ProjectImporter.resolveMavenDependencies(projectDir);
-
-            // Rebuild classpath: keep source entries and JRE container, replace library entries
-            List<IClasspathEntry> newClasspath = new ArrayList<>();
-            for (IClasspathEntry entry : javaProject.getRawClasspath()) {
-                if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE
-                        || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER
-                        || entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
-                    newClasspath.add(entry);
-                }
-            }
-            newClasspath.addAll(mavenEntries);
-
-            javaProject.setRawClasspath(
-                    newClasspath.toArray(new IClasspathEntry[0]),
-                    new NullProgressMonitor());
-
-            // Re-wire inter-project dependencies (new Maven deps may point to workspace projects)
             List<IProject> allProjects = new ArrayList<>();
             for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
                 if (p.isOpen()) {
                     allProjects.add(p);
                 }
             }
+
+            // Resolve new Maven dependencies
+            List<IClasspathEntry> mavenEntries = ProjectImporter.resolveMavenDependencies(projectDir);
+
+            // Rebuild classpath: keep source entries, JRE container and project references,
+            // replace library entries
+            List<IClasspathEntry> newClasspath = new ArrayList<>();
+            Set<String> keptProjectRefs = new HashSet<>();
+            for (IClasspathEntry entry : javaProject.getRawClasspath()) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_SOURCE
+                        || entry.getEntryKind() == IClasspathEntry.CPE_CONTAINER
+                        || entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                    if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT
+                            && !keptProjectRefs.add(entry.getPath().lastSegment())) {
+                        continue;
+                    }
+                    newClasspath.add(entry);
+                }
+            }
+
+            // Workspace projects beat installed JARs: 'mvn dependency:build-classpath' resolves a
+            // reactor sibling to its ~/.m2 JAR, but the sibling is open in the workspace. Adding
+            // the JAR next to the existing project reference made setRawClasspath fail with
+            // "Build path contains duplicate entry" and left the module compiling against the
+            // last 'mvn install' instead of the sources next door (#116). The JAR is therefore
+            // turned into a project reference rather than dropped -- dropping it would strip a
+            // transitively resolved sibling off the classpath entirely, because nothing adds it
+            // back (setupInterProjectDependencies only parses the module's *direct* POM
+            // dependencies).
+            ProjectImporter.WorkspaceMavenModules modules = ProjectImporter.mapMavenModules(allProjects);
+            List<IClasspathEntry> resolvedEntries = new ArrayList<>();
+            List<String> supersededByProject = new ArrayList<>();
+            for (IClasspathEntry entry : mavenEntries) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                    IProject sibling = ProjectImporter.findMatchingWorkspaceProject(
+                            entry.getPath().toOSString(), modules, project);
+                    if (sibling != null) {
+                        supersededByProject.add(sibling.getName());
+                        if (keptProjectRefs.add(sibling.getName())) {
+                            resolvedEntries.add(JavaCore.newProjectEntry(sibling.getFullPath()));
+                        }
+                        continue;
+                    }
+                }
+                resolvedEntries.add(entry);
+            }
+            if (!supersededByProject.isEmpty()) {
+                McpLogger.info("ProjectInfoTools", "Resolved " + supersededByProject.size()
+                        + " Maven JAR(s) to workspace projects for " + projectName + ": "
+                        + String.join(", ", supersededByProject));
+            }
+
+            newClasspath.addAll(resolvedEntries);
+
+            javaProject.setRawClasspath(
+                    newClasspath.toArray(new IClasspathEntry[0]),
+                    new NullProgressMonitor());
+
+            // Re-wire inter-project dependencies (new Maven deps may point to workspace projects)
             ProjectImporter.setupInterProjectDependencies(allProjects, new NullProgressMonitor());
 
             // Refresh to pick up any file changes
@@ -555,8 +630,9 @@ public class ProjectInfoTools {
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
-            result.put("dependenciesResolved", mavenEntries.size());
+            result.put("dependenciesResolved", resolvedEntries.size());
             result.put("totalClasspathEntries", newClasspath.size());
+            result.put("workspaceProjectsPreferred", supersededByProject);
             result.put("status", "SUCCESS");
 
             return new CallToolResult(MAPPER.writeValueAsString(result), false);

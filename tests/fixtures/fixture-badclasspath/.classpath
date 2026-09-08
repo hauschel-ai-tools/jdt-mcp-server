@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+    <classpathentry kind="src" path="src"/>
+    <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+    <!-- Does not exist on purpose: JDT reports it as a build path problem, not as a
+         Java problem, so it is invisible to a caller that only reads
+         org.eclipse.jdt.core.problem markers (issue #115). -->
+    <classpathentry kind="lib" path="lib/missing-library.jar"/>
+    <classpathentry kind="output" path="bin"/>
+</classpath>

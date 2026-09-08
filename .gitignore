@@ -37,6 +37,9 @@ local.properties
 *.iml
 .project
 .classpath
+# ...except the test fixture whose deliberately broken .classpath IS the fixture (#115)
+!tests/fixtures/fixture-badclasspath/.project
+!tests/fixtures/fixture-badclasspath/.classpath
 
 # OS
 .DS_Store
