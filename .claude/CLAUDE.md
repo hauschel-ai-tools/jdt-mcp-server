@@ -41,8 +41,11 @@ Werkzeug selbst: der per `.mcp.json` gestartete Server ist die Installation unte
 am Server weder prüfen noch ausführen. Verifikation stattdessen:
 
 - Modul-Build: `mvn -pl org.naturzukunft.jdt.mcp -am compile` (mit obigen `MAVEN_OPTS`)
+- `tests/run-unit-tests.sh` für Klassen ohne Eclipse/OSGi-Abhängigkeit (Quellen unter `org.naturzukunft.jdt.mcp/unit-tests/java/`, bewusst außerhalb des Tycho-Reactors: Tycho zieht `src/test/java` sonst mit in den Produkt-Build)
 - `tests/smoke-test.sh` und `tests/lifecycle-test.sh` gegen das gebaute Produkt
 - `tests/refactoring-test.sh` als E2E-Test für Refactorings (importiert die Fixtures und prüft Assertions auf Disk, nicht nur die Tool-Antwort)
+- `tests/compliance-test.sh` bei Änderungen am Projekt-Import (Compiler-Compliance aus dem POM, Fixture `fixture-java25`; einmal zusätzlich mit `JAVA_HOME` auf JDK 21)
+- `tests/hook-test.sh` bei Änderungen an `hooks/` oder `install.sh` (läuft ohne Produkt-Build, mit temporärem HOME)
 - Produkt-Build (`package`) einmal am Ende eines Arbeitspakets, nicht nach jedem Edit
 
 ## Git
