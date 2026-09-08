@@ -44,7 +44,7 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 - `tests/run-unit-tests.sh` für Klassen ohne Eclipse/OSGi-Abhängigkeit (Quellen unter `org.naturzukunft.jdt.mcp/unit-tests/java/`, bewusst außerhalb des Tycho-Reactors: Tycho zieht `src/test/java` sonst mit in den Produkt-Build)
 - `tests/smoke-test.sh` und `tests/lifecycle-test.sh` gegen das gebaute Produkt
 - `tests/refactoring-test.sh` als E2E-Test für Refactorings (importiert die Fixtures und prüft Assertions auf Disk, nicht nur die Tool-Antwort)
-- `tests/codegen-test.sh` bei Änderungen an `CodeGenerationTools` (E2E für `jdt_implement_interface`: Record/`sealed`/Kommentar-Header, Assertions auf Disk plus `javac`)
+- `tests/codegen-test.sh` bei Änderungen an `CodeGenerationTools` (E2E für `jdt_implement_interface`: Record/`sealed`/Kommentar-Header sowie Ablehnung von Annotationstyp und Interface als Ziel, Assertions auf Disk plus `javac`)
 - `tests/reopen-test.sh` bei Änderungen am Projekt-Import oder am Start-Build (importiert `fixture-parent`, startet den Server mehrfach auf demselben Workspace und prüft, dass ein wiedergeöffnetes Projekt keine falsch-positiven Fehler meldet)
 - `tests/buildpath-test.sh` bei Änderungen an Classpath-Aufbau, `jdt_maven_update_project` oder Marker-Auswertung (installiert die Fixture-Geschwister vorher per `mvn install` ins lokale Repository)
 - `tests/compliance-test.sh` bei Änderungen am Projekt-Import (Compiler-Compliance aus dem POM, Fixture `fixture-java25`; einmal zusätzlich mit `JAVA_HOME` auf JDK 21)

@@ -390,7 +390,7 @@ tests/refactoring-test.sh [path/to/jdt-mcp-binary]
 
 ### Code-Generierungs-Tests (End-to-End)
 
-Importieren `tests/fixtures/fixture-parent` und lassen `jdt_implement_interface` auf Deklarations-Köpfe los, die eine reine Textsuche aushebeln (Record mit Komponentenliste, `sealed`-Klasse mit `permits`, Kommentar mit `{` im Kopf, verschachtelte Generics in einer bestehenden `implements`-Liste). Geprüft wird die Datei **auf der Festplatte**, anschließend wird sie mit `javac` übersetzt:
+Importieren `tests/fixtures/fixture-parent` und lassen `jdt_implement_interface` auf Deklarations-Köpfe los, die eine reine Textsuche aushebeln (Record mit Komponentenliste, `sealed`-Klasse mit `permits`, Kommentar mit `{` im Kopf, verschachtelte Generics in einer bestehenden `implements`-Liste). Zwei Fälle prüfen die Ablehnung ungeeigneter Ziele (Annotationstyp, Interface): Fehlerantwort statt Schreibzugriff, Datei bleibt byte-identisch. Geprüft wird die Datei **auf der Festplatte**, anschließend wird sie mit `javac` übersetzt:
 
 ```bash
 tests/codegen-test.sh [path/to/jdt-mcp-binary]
