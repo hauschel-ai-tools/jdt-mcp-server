@@ -202,8 +202,12 @@ public record MavenCompilerCompliance(String version, String propertyKey, Path p
 
     /**
      * Checks that the POM at {@code candidate} is the artifact the {@code <parent>} block declares.
-     * Only compares what the candidate states itself: a POM that inherits its groupId or version
-     * from its own parent does not repeat them, and a missing value must not count as a mismatch.
+     * Only compares what the candidate states itself: a POM that inherits its groupId from its own
+     * parent does not repeat it, and a missing value must not count as a mismatch.
+     *
+     * <p>The version is deliberately left out. A child pins its parent's version literally, while
+     * the parent commonly carries a CI-friendly placeholder ({@code <version>${revision}</version>})
+     * -- comparing the two would drop the real parent out of the chain without a word.
      */
     private static boolean declaresArtifact(Path candidate, Element parentElement) {
         Element candidateRoot;
@@ -213,8 +217,7 @@ public record MavenCompilerCompliance(String version, String propertyKey, Path p
             return false;
         }
         return matches(candidateRoot, parentElement, "groupId")
-                && matches(candidateRoot, parentElement, "artifactId")
-                && matches(candidateRoot, parentElement, "version");
+                && matches(candidateRoot, parentElement, "artifactId");
     }
 
     private static boolean matches(Element candidateRoot, Element parentElement, String tagName) {

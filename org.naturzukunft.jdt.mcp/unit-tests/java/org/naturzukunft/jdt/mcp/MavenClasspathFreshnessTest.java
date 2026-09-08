@@ -113,7 +113,7 @@ class MavenClasspathFreshnessTest {
         Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
 
         assertTrue(reason.isPresent(), "module pom.xml changed, expected stale");
-        assertTrue(reason.get().contains("module/pom.xml"), reason.orElse(""));
+        assertEquals("pom.xml changed since the last classpath resolution", reason.get());
     }
 
     @Test
@@ -128,7 +128,7 @@ class MavenClasspathFreshnessTest {
         Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
 
         assertTrue(reason.isPresent(), "parent pom.xml changed, expected stale");
-        assertTrue(reason.get().endsWith("changed since the last classpath resolution"), reason.orElse(""));
+        assertEquals("../pom.xml changed since the last classpath resolution", reason.get());
     }
 
     @Test
@@ -164,6 +164,52 @@ class MavenClasspathFreshnessTest {
                 "the POM above declares a different artifact, it must not enter the chain");
     }
 
+    @Test
+    @DisplayName("fingerprint uses paths relative to the module directory, not absolute ones")
+    void fingerprintIsRelative(@TempDir Path root) throws IOException {
+        Path moduleDir = layout(root);
+
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+
+        assertTrue(stamp.contains(":pom.xml\n"), stamp);
+        assertTrue(stamp.contains(":..") && stamp.contains("pom.xml"), stamp);
+        assertTrue(!stamp.contains(root.toString()),
+                "an absolute path would blow up the fingerprint of a deep chain: " + stamp);
+    }
+
+    @Test
+    @DisplayName("a long chain falls back to a hash — a persistent property caps at 2048 characters")
+    void longChainIsHashed(@TempDir Path root) throws IOException {
+        Path moduleDir = deepChain(root, 32);
+        Files.writeString(moduleDir.resolve(".classpath"), CLASSPATH);
+
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+
+        assertTrue(stamp.startsWith("sha256:"), stamp);
+        assertTrue(stamp.length() < 2048, "hashed fingerprint must fit into a persistent property");
+        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(moduleDir, stamp),
+                "an unchanged chain stays current in hashed form too");
+
+        touch(moduleDir.resolve("pom.xml"), Instant.now());
+        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
+        assertTrue(reason.isPresent(), "a changed chain is still detected when hashed");
+        assertEquals("POM chain changed since the last classpath resolution", reason.get());
+    }
+
+    @Test
+    @DisplayName("a parent carrying ${revision} instead of a literal version stays in the chain")
+    void parentWithPlaceholderVersion(@TempDir Path root) throws IOException {
+        Path moduleDir = layout(root);
+        write(root.resolve("pom.xml"),
+                PARENT_POM.replace("<version>1.0.0</version>", "<version>${revision}</version>"),
+                hoursAgo(3));
+
+        List<Path> chain = MavenClasspathFreshness.pomChain(moduleDir.resolve("pom.xml"));
+
+        assertEquals(2, chain.size(),
+                "the child pins the version literally, the parent uses a placeholder — same artifact");
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /**
@@ -186,6 +232,39 @@ class MavenClasspathFreshnessTest {
 
     private static void touch(Path file, Instant modified) throws IOException {
         Files.setLastModifiedTime(file, FileTime.from(modified));
+    }
+
+    /**
+     * Builds a chain of {@code depth} nested POMs, deep enough that the readable fingerprint (whose
+     * lines grow by one {@code ../} per level) passes the length at which it has to be hashed.
+     * Returns the innermost module.
+     */
+    private static Path deepChain(Path root, int depth) throws IOException {
+        Path current = root;
+        for (int level = 0; level < depth; level++) {
+            String artifactId = "level-" + level;
+            String parentBlock = level == 0 ? "" : """
+                      <parent>
+                        <groupId>org.example</groupId>
+                        <artifactId>level-%d</artifactId>
+                        <version>1.0.0</version>
+                      </parent>
+                    """.formatted(level - 1);
+            Path pom = current.resolve("pom.xml");
+            write(pom, """
+                    <project>
+                      <modelVersion>4.0.0</modelVersion>
+                    %s  <groupId>org.example</groupId>
+                      <artifactId>%s</artifactId>
+                      <version>1.0.0</version>
+                    </project>
+                    """.formatted(parentBlock, artifactId), hoursAgo(3));
+            if (level < depth - 1) {
+                current = current.resolve("nested-module-" + level);
+                Files.createDirectories(current);
+            }
+        }
+        return current;
     }
 
     private static Instant hoursAgo(int hours) {

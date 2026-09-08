@@ -1,8 +1,11 @@
 package org.naturzukunft.jdt.mcp;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +50,14 @@ import java.util.Set;
  */
 public final class MavenClasspathFreshness {
 
+    /**
+     * Longest fingerprint kept in readable form. Well below Eclipse's 2048 character limit for a
+     * persistent property value, so a deep chain with long directory names still fits.
+     */
+    private static final int MAX_READABLE_LENGTH = 1024;
+
+    private static final String HASH_PREFIX = "sha256:";
+
     private MavenClasspathFreshness() {
     }
 
@@ -83,19 +94,54 @@ public final class MavenClasspathFreshness {
 
     /**
      * Returns the fingerprint of the module's POM chain: one line per POM, from the module POM up
-     * to the last ancestor present in the checkout, each with its modification time and size.
-     * Store this after resolving a module's classpath and hand it back to
-     * {@link #staleReason(Path, String)} on the next start.
+     * to the last ancestor present in the checkout, each with its modification time, size and path
+     * relative to the module directory. Store this after resolving a module's classpath and hand it
+     * back to {@link #staleReason(Path, String)} on the next start.
+     *
+     * <p>Paths are relative and the result is replaced by its SHA-256 once it grows past
+     * {@link #MAX_READABLE_LENGTH}, because the caller stores it as a persistent project property
+     * and Eclipse rejects values above {@code PropertyManager2.MAX_VALUE_SIZE} (2048 characters).
+     * A rejected write leaves no stamp behind, and a module without a stamp re-resolves on every
+     * start -- exactly the loop this class exists to avoid. The hashed form costs only the ability
+     * to name the POM that changed.
      */
     public static String fingerprint(Path moduleDir) {
+        Path base = moduleDir.toAbsolutePath().normalize();
         StringBuilder fingerprint = new StringBuilder();
-        for (Path pom : pomChain(moduleDir.resolve("pom.xml"))) {
+        for (Path pom : pomChain(base.resolve("pom.xml"))) {
             fingerprint.append(modifiedMillis(pom))
                     .append(':').append(size(pom))
-                    .append(':').append(pom)
+                    .append(':').append(relativize(base, pom))
                     .append('\n');
         }
-        return fingerprint.toString();
+        String readable = fingerprint.toString();
+        return readable.length() <= MAX_READABLE_LENGTH ? readable : HASH_PREFIX + sha256(readable);
+    }
+
+    /** Relative to the module directory ({@code pom.xml}, {@code ../pom.xml}, ...) where possible. */
+    private static String relativize(Path base, Path pom) {
+        try {
+            return base.relativize(pom).toString();
+        } catch (IllegalArgumentException e) {
+            // Different roots (a parent on another drive or mount) -- fall back to the full path.
+            return pom.toString();
+        }
+    }
+
+    private static String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16)).append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandatory in every Java platform; if it is gone, fall back to a value that
+            // still changes with the input, at the price of collisions.
+            return Integer.toHexString(value.hashCode());
+        }
     }
 
     /**
@@ -121,6 +167,9 @@ public final class MavenClasspathFreshness {
 
     /** Names the first POM that differs between two fingerprints, for the log. */
     private static String describeDifference(String storedStamp, String current) {
+        if (storedStamp.startsWith(HASH_PREFIX) || current.startsWith(HASH_PREFIX)) {
+            return "POM chain changed since the last classpath resolution";
+        }
         List<String> stored = storedStamp.lines().toList();
         List<String> now = current.lines().toList();
         for (int i = 0; i < now.size(); i++) {
