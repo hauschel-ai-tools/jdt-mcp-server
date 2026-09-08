@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -56,7 +56,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: jdtls-mcp-${{ github.ref_name }}
+          name: jdtls-mcp-build-${{ github.run_number }}
           path: |
             org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.tar.gz
             org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.zip
