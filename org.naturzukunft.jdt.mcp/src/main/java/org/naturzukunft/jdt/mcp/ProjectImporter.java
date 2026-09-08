@@ -261,6 +261,11 @@ public class ProjectImporter {
             org.eclipse.core.runtime.IPath outputPath = project.getFullPath().append("target/classes");
             javaProject.setOutputLocation(outputPath, monitor);
 
+            // Set compiler compliance from the module's (or an ancestor's) pom.xml, so the
+            // project compiles at its own Maven release instead of silently inheriting the
+            // workspace default (#82).
+            applyCompilerCompliance(javaProject, moduleDir.resolve("pom.xml"));
+
             McpLogger.info("ProjectImporter", "Created Maven project: " + projectName +
                     " with " + entries.size() + " classpath entries");
             return project;
@@ -269,6 +274,28 @@ public class ProjectImporter {
             McpLogger.error("ProjectImporter", "Failed to create Maven project: " + projectName, e);
             return null;
         }
+    }
+
+    /**
+     * Sets {@link IJavaProject} compiler compliance/source/target from the Maven compiler
+     * release declared for {@code pomFile} (see {@link MavenCompilerCompliance}). Leaves the
+     * project's options untouched (workspace default) when the POM chain declares none.
+     */
+    private static void applyCompilerCompliance(IJavaProject javaProject, Path pomFile) {
+        MavenCompilerCompliance.resolve(pomFile).ifPresent(compliance -> {
+            String level = compliance.version();
+            if (!JavaCore.isSupportedJavaVersion(level)) {
+                String fallback = JavaCore.latestSupportedJavaVersion();
+                McpLogger.warn("ProjectImporter", "Compiler release " + level + " from " + compliance.propertyKey()
+                        + " (" + compliance.pomFile() + ") is not supported by this JDT version, using highest "
+                        + "supported level " + fallback + " instead");
+                level = fallback;
+            }
+            javaProject.setOption(JavaCore.COMPILER_COMPLIANCE, level);
+            javaProject.setOption(JavaCore.COMPILER_SOURCE, level);
+            javaProject.setOption(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, level);
+            McpLogger.info("ProjectImporter", "compliance " + level + " from " + compliance.pomFile());
+        });
     }
 
     /**
