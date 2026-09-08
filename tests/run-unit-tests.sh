@@ -50,6 +50,7 @@ echo "Compiling unit tests..."
 # Production classes under test: only those without an Eclipse/OSGi/Jackson/MCP-SDK import.
 MAIN_SOURCES=(
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenCompilerCompliance.java"
+    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenClasspathFreshness.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/tools/ArgParser.java"
     "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/server/ToolArgumentValidator.java"
 )

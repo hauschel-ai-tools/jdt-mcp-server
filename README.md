@@ -270,6 +270,7 @@ Der JDT MCP Server verwaltet einen **Eclipse Workspace** pro Arbeitsverzeichnis.
 
 - **Automatischer Import**: Beim Start importiert der Server alle Projekte aus dem Arbeitsverzeichnis (Maven, Gradle, Eclipse `.project`)
 - **Persistenter Workspace**: Der Workspace bleibt zwischen Neustarts erhalten — kein erneuter Import nötig
+- **Classpath-Auffrischung**: Ist die `pom.xml` eines Moduls (oder eine Parent-`pom.xml`) neuer als die beim letzten Import erzeugte `.classpath`, löst der Server die Abhängigkeiten des Moduls beim Start neu auf und baut den Workspace vollständig — sonst würde er gegen den Stand des letzten Imports bauen
 - **Ein Workspace pro Verzeichnis**: Jedes Arbeitsverzeichnis bekommt einen eigenen, isolierten Workspace (MD5-Hash des Pfads)
 
 ### Workspace zurücksetzen

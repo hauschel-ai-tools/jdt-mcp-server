@@ -152,6 +152,26 @@ public record MavenCompilerCompliance(String version, String propertyKey, Path p
         return Optional.empty();
     }
 
+    /**
+     * Resolves the {@code <parent>} POM of {@code pomFile} on disk, via its {@code <relativePath>}
+     * (default {@code ../pom.xml}, an explicit empty value meaning "do not look on disk").
+     *
+     * @return the ancestor POM path, or {@link Optional#empty()} when the POM declares no parent,
+     *         suppresses the relative path, or cannot be parsed. The returned path is not checked
+     *         for existence -- callers decide what a missing ancestor means for them.
+     */
+    public static Optional<Path> parentPomOf(Path pomFile) {
+        Path normalized = pomFile.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(normalized)) {
+            return Optional.empty();
+        }
+        try {
+            return parentPomOf(parse(normalized).getDocumentElement(), normalized);
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
     private static Optional<Path> parentPomOf(Element root, Path pomFile) {
         for (Element parent : childElements(root, "parent")) {
             String relativePath = childText(parent, "relativePath");

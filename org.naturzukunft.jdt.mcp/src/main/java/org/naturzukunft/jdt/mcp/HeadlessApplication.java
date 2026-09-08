@@ -200,6 +200,7 @@ public class HeadlessApplication implements IApplication {
 
         Thread importThread = new Thread(() -> {
             try {
+                ProjectImporter.resetImportStatistics();
                 List<IProject> projects = ProjectImporter.importFromDirectory(
                         Path.of(workDir), new NullProgressMonitor());
 
@@ -214,9 +215,13 @@ public class HeadlessApplication implements IApplication {
                 var desc = workspace.getDescription();
                 desc.setAutoBuilding(true);
                 workspace.setDescription(desc);
-                McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering workspace build...");
 
-                workspace.build(IncrementalProjectBuilder.INCREMENTAL_BUILD, new NullProgressMonitor());
+                int buildKind = startupBuildKind();
+                McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering "
+                        + (buildKind == IncrementalProjectBuilder.FULL_BUILD ? "full" : "incremental")
+                        + " workspace build...");
+
+                workspace.build(buildKind, new NullProgressMonitor());
                 McpLogger.info("HeadlessApplication", "Workspace build completed");
 
             } catch (Exception e) {
@@ -259,6 +264,31 @@ public class HeadlessApplication implements IApplication {
 
         McpLogger.info("HeadlessApplication", "Shutting down");
         return IApplication.EXIT_OK;
+    }
+
+    /**
+     * Chooses the build kind for the build that follows the startup import.
+     *
+     * <p>A project whose classpath had to be re-resolved (its POM changed while no session was
+     * running, see {@link MavenClasspathFreshness}) carries a saved build state that was produced
+     * against the old classpath, plus the problem markers that go with it. An incremental build
+     * over that state is not enough to clear them reliably, so a re-resolved workspace is built in
+     * full.
+     *
+     * <p>Reopening an unchanged workspace -- the common case, since clients restart the server
+     * often -- stays incremental on purpose: a full build of a workspace with dozens of modules
+     * costs a recompile of everything at every start, and the refresh done while reopening
+     * (see {@code ProjectImporter#reopenExistingProject}) already gives the incremental build the
+     * resource delta it needs for anything that changed on disk meanwhile.
+     */
+    private static int startupBuildKind() {
+        int reconfigured = ProjectImporter.getReconfiguredProjectCount();
+        if (reconfigured > 0) {
+            McpLogger.info("HeadlessApplication", reconfigured + " reopened project(s) needed a fresh classpath — "
+                    + "building the workspace in full to drop build state and markers of the previous session");
+            return IncrementalProjectBuilder.FULL_BUILD;
+        }
+        return IncrementalProjectBuilder.INCREMENTAL_BUILD;
     }
 
     /**

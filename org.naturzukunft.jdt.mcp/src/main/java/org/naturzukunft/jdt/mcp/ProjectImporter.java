@@ -8,8 +8,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -17,6 +19,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.eclipse.core.resources.ICommand;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IProjectDescription;
+import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IProgressMonitor;
@@ -53,6 +56,36 @@ public class ProjectImporter {
      */
     public static void clearImportedRoots() {
         importedRoots.clear();
+    }
+
+    private static final AtomicInteger reopenedProjects = new AtomicInteger();
+    private static final AtomicInteger reconfiguredProjects = new AtomicInteger();
+
+    /**
+     * Resets the statistics read via {@link #getReopenedProjectCount()} and
+     * {@link #getReconfiguredProjectCount()}. Call this directly before an import run whose
+     * outcome you want to inspect -- the counters are global, not per call.
+     */
+    public static void resetImportStatistics() {
+        reopenedProjects.set(0);
+        reconfiguredProjects.set(0);
+    }
+
+    /**
+     * Number of projects that were already in the workspace and got reopened instead of created
+     * since the last {@link #resetImportStatistics()}. A reopened project brings a build state and
+     * problem markers of an earlier session with it.
+     */
+    public static int getReopenedProjectCount() {
+        return reopenedProjects.get();
+    }
+
+    /**
+     * Number of reopened projects whose classpath had to be re-resolved because their POM chain
+     * changed since the last import (see {@link MavenClasspathFreshness}).
+     */
+    public static int getReconfiguredProjectCount() {
+        return reconfiguredProjects.get();
     }
 
     /**
@@ -119,7 +152,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(description.getName());
             if (project.exists()) {
-                project.open(monitor);
+                reopenExistingProject(project, monitor);
                 McpLogger.info("ProjectImporter", "Opened existing project: " + description.getName());
             } else {
                 project.create(description, monitor);
@@ -219,61 +252,105 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                project.open(monitor);
-                McpLogger.info("ProjectImporter", "Opened existing project: " + projectName);
+                reopenExistingProject(project, monitor);
+
+                // The .classpath left behind by the previous import is a snapshot of the POM at
+                // that time. If the POM chain has changed since, keeping it means building against
+                // dependencies that are gone and missing the ones that were added -- JDT reports
+                // build path errors that `mvn` does not (#114).
+                Optional<String> staleReason = MavenClasspathFreshness.staleReason(moduleDir);
+                if (staleReason.isEmpty()) {
+                    McpLogger.info("ProjectImporter",
+                            "Opened existing project: " + projectName + " (classpath up to date)");
+                    return project;
+                }
+
+                McpLogger.info("ProjectImporter", "Opened existing project: " + projectName
+                        + " — re-resolving classpath (" + staleReason.get() + ")");
+                configureMavenProject(project, moduleDir, projectName, monitor);
+                reconfiguredProjects.incrementAndGet();
                 return project;
             }
 
             project.create(description, monitor);
             project.open(monitor);
 
-            // Configure as Java project
-            IJavaProject javaProject = JavaCore.create(project);
-
-            List<IClasspathEntry> entries = new ArrayList<>();
-
-            // Add source folders that exist. Test sources get their own output folder
-            // (target/test-classes) so they don't compile into target/classes and end up
-            // packaged into the module's jar (#84).
-            addSourceFolderIfExists(project, entries, "src/main/java");
-            addSourceFolderIfExists(project, entries, "src/test/java", "target/test-classes");
-            addSourceFolderIfExists(project, entries, "src/main/resources");
-            addSourceFolderIfExists(project, entries, "src/test/resources", "target/test-classes");
-
-            // If no standard Maven dirs found, check for src/ directly
-            if (entries.isEmpty()) {
-                addSourceFolderIfExists(project, entries, "src");
-            }
-
-            // Add JRE container
-            entries.add(JavaCore.newContainerEntry(
-                    new org.eclipse.core.runtime.Path("org.eclipse.jdt.launching.JRE_CONTAINER")));
-
-            // Add Maven dependencies from local repository
-            addMavenDependencies(moduleDir, entries);
-
-            // Warn if Lombok is in dependencies but agent is not loaded
-            checkLombokInClasspath(entries, projectName);
-
-            javaProject.setRawClasspath(entries.toArray(new IClasspathEntry[0]), monitor);
-
-            // Set output location
-            org.eclipse.core.runtime.IPath outputPath = project.getFullPath().append("target/classes");
-            javaProject.setOutputLocation(outputPath, monitor);
-
-            // Set compiler compliance from the module's (or an ancestor's) pom.xml, so the
-            // project compiles at its own Maven release instead of silently inheriting the
-            // workspace default (#82).
-            applyCompilerCompliance(javaProject, moduleDir.resolve("pom.xml"));
-
-            McpLogger.info("ProjectImporter", "Created Maven project: " + projectName +
-                    " with " + entries.size() + " classpath entries");
+            configureMavenProject(project, moduleDir, projectName, monitor);
             return project;
 
         } catch (Exception e) {
             McpLogger.error("ProjectImporter", "Failed to create Maven project: " + projectName, e);
             return null;
         }
+    }
+
+    /**
+     * Opens a project that is already in the workspace and refreshes it from disk.
+     *
+     * <p>The refresh is what makes a reopened project trustworthy: the workspace tree (and with it
+     * every problem marker) was persisted when the previous session ended, and Eclipse does not
+     * notice on its own that files changed while no session was running. Without the refresh the
+     * server answers from the last session's state -- reporting problems that have long been fixed
+     * and missing the ones that were introduced (#114).
+     */
+    private static void reopenExistingProject(IProject project, IProgressMonitor monitor) throws Exception {
+        project.open(monitor);
+        reopenedProjects.incrementAndGet();
+        try {
+            project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter",
+                    "Could not refresh reopened project " + project.getName() + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Configures an open project as a Java project for a Maven module: source folders, JRE
+     * container, resolved Maven dependencies, output location and compiler compliance. Used both
+     * for a freshly created project and for a reopened one whose {@code .classpath} went stale.
+     */
+    private static void configureMavenProject(IProject project, Path moduleDir, String projectName,
+            IProgressMonitor monitor) throws Exception {
+        IJavaProject javaProject = JavaCore.create(project);
+
+        List<IClasspathEntry> entries = new ArrayList<>();
+
+        // Add source folders that exist. Test sources get their own output folder
+        // (target/test-classes) so they don't compile into target/classes and end up
+        // packaged into the module's jar (#84).
+        addSourceFolderIfExists(project, entries, "src/main/java");
+        addSourceFolderIfExists(project, entries, "src/test/java", "target/test-classes");
+        addSourceFolderIfExists(project, entries, "src/main/resources");
+        addSourceFolderIfExists(project, entries, "src/test/resources", "target/test-classes");
+
+        // If no standard Maven dirs found, check for src/ directly
+        if (entries.isEmpty()) {
+            addSourceFolderIfExists(project, entries, "src");
+        }
+
+        // Add JRE container
+        entries.add(JavaCore.newContainerEntry(
+                new org.eclipse.core.runtime.Path("org.eclipse.jdt.launching.JRE_CONTAINER")));
+
+        // Add Maven dependencies from local repository
+        addMavenDependencies(moduleDir, entries);
+
+        // Warn if Lombok is in dependencies but agent is not loaded
+        checkLombokInClasspath(entries, projectName);
+
+        javaProject.setRawClasspath(entries.toArray(new IClasspathEntry[0]), monitor);
+
+        // Set output location
+        org.eclipse.core.runtime.IPath outputPath = project.getFullPath().append("target/classes");
+        javaProject.setOutputLocation(outputPath, monitor);
+
+        // Set compiler compliance from the module's (or an ancestor's) pom.xml, so the
+        // project compiles at its own Maven release instead of silently inheriting the
+        // workspace default (#82).
+        applyCompilerCompliance(javaProject, moduleDir.resolve("pom.xml"));
+
+        McpLogger.info("ProjectImporter", "Configured Maven project: " + projectName +
+                " with " + entries.size() + " classpath entries");
     }
 
     /**
@@ -316,7 +393,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                project.open(monitor);
+                reopenExistingProject(project, monitor);
                 return project;
             }
 
@@ -776,7 +853,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                project.open(monitor);
+                reopenExistingProject(project, monitor);
                 McpLogger.info("ProjectImporter", "Opened existing Gradle project: " + projectName);
                 return project;
             }

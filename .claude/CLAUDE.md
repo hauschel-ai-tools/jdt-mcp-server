@@ -45,6 +45,7 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 - `tests/smoke-test.sh` und `tests/lifecycle-test.sh` gegen das gebaute Produkt
 - `tests/refactoring-test.sh` als E2E-Test für Refactorings (importiert die Fixtures und prüft Assertions auf Disk, nicht nur die Tool-Antwort)
 - `tests/codegen-test.sh` bei Änderungen an `CodeGenerationTools` (E2E für `jdt_implement_interface`: Record/`sealed`/Kommentar-Header, Assertions auf Disk plus `javac`)
+- `tests/reopen-test.sh` bei Änderungen am Projekt-Import oder am Start-Build (importiert `fixture-parent`, startet den Server mehrfach auf demselben Workspace und prüft, dass ein wiedergeöffnetes Projekt keine falsch-positiven Fehler meldet)
 - `tests/compliance-test.sh` bei Änderungen am Projekt-Import (Compiler-Compliance aus dem POM, Fixture `fixture-java25`; einmal zusätzlich mit `JAVA_HOME` auf JDK 21)
 - `tests/hook-test.sh` bei Änderungen an `hooks/` oder `install.sh` (läuft ohne Produkt-Build, mit temporärem HOME)
 - Produkt-Build (`package`) einmal am Ende eines Arbeitspakets, nicht nach jedem Edit
