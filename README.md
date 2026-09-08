@@ -396,9 +396,9 @@ Importieren `tests/fixtures/fixture-parent` und lassen `jdt_implement_interface`
 tests/codegen-test.sh [path/to/jdt-mcp-binary]
 ```
 
-### Build-Path-Test (End-to-End)
+### Build-Path-Tests (End-to-End)
 
-Importiert `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüft, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet statt nur den Sammelmarker:
+Importieren `tests/fixtures/fixture-parent` (Reaktor-Geschwister, vorher per `mvn install` im lokalen Repository) und `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüfen, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet und `jdt_maven_update_project` das Geschwistermodul als Projektreferenz behält statt als `~/.m2`-Jar:
 
 ```bash
 tests/buildpath-test.sh [path/to/jdt-mcp-binary]

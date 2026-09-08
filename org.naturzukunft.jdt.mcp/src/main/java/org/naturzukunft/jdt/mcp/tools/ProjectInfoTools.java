@@ -553,8 +553,40 @@ public class ProjectInfoTools {
                 return new CallToolResult("Not a Maven project (no pom.xml): " + projectName, true);
             }
 
+            List<IProject> allProjects = new ArrayList<>();
+            for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+                if (p.isOpen()) {
+                    allProjects.add(p);
+                }
+            }
+
             // Resolve new Maven dependencies
             List<IClasspathEntry> mavenEntries = ProjectImporter.resolveMavenDependencies(projectDir);
+
+            // Workspace projects beat installed JARs: 'mvn dependency:build-classpath' resolves a
+            // reactor sibling to its ~/.m2 JAR, but the sibling is open in the workspace and
+            // already on the classpath as a project reference. Adding the JAR on top made
+            // setRawClasspath fail with "Build path contains duplicate entry" and left the module
+            // compiling against the last 'mvn install' instead of the sources next door (#116).
+            Map<String, IProject> artifactToProject = ProjectImporter.mapArtifactIdsToProjects(allProjects);
+            List<IClasspathEntry> resolvedEntries = new ArrayList<>();
+            List<String> supersededByProject = new ArrayList<>();
+            for (IClasspathEntry entry : mavenEntries) {
+                if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                    IProject sibling = ProjectImporter.findMatchingWorkspaceProject(
+                            entry.getPath().lastSegment(), artifactToProject, project);
+                    if (sibling != null) {
+                        supersededByProject.add(sibling.getName());
+                        continue;
+                    }
+                }
+                resolvedEntries.add(entry);
+            }
+            if (!supersededByProject.isEmpty()) {
+                McpLogger.info("ProjectInfoTools", "Skipped " + supersededByProject.size()
+                        + " Maven JAR(s) superseded by workspace projects for " + projectName + ": "
+                        + String.join(", ", supersededByProject));
+            }
 
             // Rebuild classpath: keep source entries and JRE container, replace library entries
             List<IClasspathEntry> newClasspath = new ArrayList<>();
@@ -565,19 +597,13 @@ public class ProjectInfoTools {
                     newClasspath.add(entry);
                 }
             }
-            newClasspath.addAll(mavenEntries);
+            newClasspath.addAll(resolvedEntries);
 
             javaProject.setRawClasspath(
                     newClasspath.toArray(new IClasspathEntry[0]),
                     new NullProgressMonitor());
 
             // Re-wire inter-project dependencies (new Maven deps may point to workspace projects)
-            List<IProject> allProjects = new ArrayList<>();
-            for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
-                if (p.isOpen()) {
-                    allProjects.add(p);
-                }
-            }
             ProjectImporter.setupInterProjectDependencies(allProjects, new NullProgressMonitor());
 
             // Refresh to pick up any file changes
@@ -585,8 +611,9 @@ public class ProjectInfoTools {
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
-            result.put("dependenciesResolved", mavenEntries.size());
+            result.put("dependenciesResolved", resolvedEntries.size());
             result.put("totalClasspathEntries", newClasspath.size());
+            result.put("workspaceProjectsPreferred", supersededByProject);
             result.put("status", "SUCCESS");
 
             return new CallToolResult(MAPPER.writeValueAsString(result), false);

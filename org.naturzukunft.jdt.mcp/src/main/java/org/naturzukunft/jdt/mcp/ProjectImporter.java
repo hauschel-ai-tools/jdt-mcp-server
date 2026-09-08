@@ -4,6 +4,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -560,18 +561,7 @@ public class ProjectImporter {
      * then adds project entries to the classpath (replacing any matching JAR entries).
      */
     public static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
-        // Build a map of artifactId -> IProject for all workspace projects
-        Map<String, IProject> artifactToProject = new HashMap<>();
-        for (IProject project : projects) {
-            Path projectDir = Path.of(project.getLocation().toOSString());
-            Path pomFile = projectDir.resolve("pom.xml");
-            if (Files.exists(pomFile)) {
-                String artifactId = readMavenArtifactId(pomFile);
-                if (artifactId != null) {
-                    artifactToProject.put(artifactId, project);
-                }
-            }
-        }
+        Map<String, IProject> artifactToProject = mapArtifactIdsToProjects(projects);
 
         if (artifactToProject.size() < 2) {
             return; // Nothing to wire up
@@ -591,9 +581,24 @@ public class ProjectImporter {
 
                 IClasspathEntry[] existing = javaProject.getRawClasspath();
                 List<IClasspathEntry> newClasspath = new ArrayList<>();
-                Set<String> existingProjectRefs = new HashSet<>();
                 List<IProject> referencedProjects = new ArrayList<>();
                 int addedCount = 0;
+                int droppedCount = 0;
+
+                // Every project already referenced by the raw classpath, collected up front:
+                // a project entry may sit *after* the sibling JAR of the same module, and
+                // turning that JAR into a second project entry makes setRawClasspath reject
+                // the whole classpath with "Build path contains duplicate entry" -- which
+                // used to abort the dependency setup for the module entirely (#116).
+                Set<String> knownProjectRefs = new HashSet<>();
+                for (IClasspathEntry entry : existing) {
+                    if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
+                        knownProjectRefs.add(entry.getPath().lastSegment());
+                    }
+                }
+
+                // Project names already written to newClasspath, so no name is emitted twice
+                Set<String> placedProjectRefs = new HashSet<>();
 
                 // Strategy 1: Replace matching JAR entries with project entries
                 for (IClasspathEntry entry : existing) {
@@ -601,16 +606,28 @@ public class ProjectImporter {
                         String jarName = entry.getPath().lastSegment();
                         IProject matchedProject = findMatchingWorkspaceProject(jarName, artifactToProject, project);
                         if (matchedProject != null) {
+                            if (knownProjectRefs.contains(matchedProject.getName())) {
+                                // The workspace project is already on the classpath; this JAR is
+                                // the stale ~/.m2 copy of the same module. Drop it, the project
+                                // reference wins.
+                                droppedCount++;
+                                continue;
+                            }
                             newClasspath.add(JavaCore.newProjectEntry(matchedProject.getFullPath()));
                             referencedProjects.add(matchedProject);
-                            existingProjectRefs.add(matchedProject.getName());
+                            knownProjectRefs.add(matchedProject.getName());
+                            placedProjectRefs.add(matchedProject.getName());
                             addedCount++;
                             continue;
                         }
                     }
                     if (entry.getEntryKind() == IClasspathEntry.CPE_PROJECT) {
                         String projName = entry.getPath().lastSegment();
-                        existingProjectRefs.add(projName);
+                        if (!placedProjectRefs.add(projName)) {
+                            // Duplicate project entry already present in the raw classpath
+                            droppedCount++;
+                            continue;
+                        }
                         IProject refProject = ResourcesPlugin.getWorkspace().getRoot().getProject(projName);
                         if (refProject.exists()) {
                             referencedProjects.add(refProject);
@@ -628,16 +645,15 @@ public class ProjectImporter {
                     for (String depArtifactId : depArtifactIds) {
                         IProject depProject = artifactToProject.get(depArtifactId);
                         if (depProject != null && !depProject.equals(project)
-                                && !existingProjectRefs.contains(depProject.getName())) {
+                                && placedProjectRefs.add(depProject.getName())) {
                             newClasspath.add(JavaCore.newProjectEntry(depProject.getFullPath()));
                             referencedProjects.add(depProject);
-                            existingProjectRefs.add(depProject.getName());
                             addedCount++;
                         }
                     }
                 }
 
-                if (addedCount > 0) {
+                if (addedCount > 0 || droppedCount > 0) {
                     javaProject.setRawClasspath(newClasspath.toArray(new IClasspathEntry[0]), monitor);
 
                     IProjectDescription desc = project.getDescription();
@@ -646,7 +662,9 @@ public class ProjectImporter {
 
                     totalAdded += addedCount;
                     McpLogger.info("ProjectImporter", "Added " + addedCount +
-                            " project dependencies to " + project.getName());
+                            " project dependencies to " + project.getName()
+                            + (droppedCount > 0 ? " (dropped " + droppedCount
+                                    + " duplicate entries superseded by project references)" : ""));
                 }
             } catch (Exception e) {
                 McpLogger.warn("ProjectImporter",
@@ -661,17 +679,42 @@ public class ProjectImporter {
     }
 
     /**
-     * Checks if a JAR filename matches a workspace project's artifactId.
-     * E.g., "culinarygraph-rdf-api-0.0.1-SNAPSHOT.jar" matches project with artifactId "culinarygraph-rdf-api".
+     * Maps the Maven artifactId of every given project to the project itself. Projects
+     * without a readable {@code pom.xml} are skipped.
      */
-    private static IProject findMatchingWorkspaceProject(String jarName,
-            Map<String, IProject> artifactToProject, IProject self) {
-        for (var entry : artifactToProject.entrySet()) {
-            if (jarName.startsWith(entry.getKey() + "-") && !entry.getValue().equals(self)) {
-                return entry.getValue();
+    public static Map<String, IProject> mapArtifactIdsToProjects(Collection<IProject> projects) {
+        Map<String, IProject> artifactToProject = new HashMap<>();
+        for (IProject project : projects) {
+            if (project.getLocation() == null) {
+                continue;
+            }
+            Path pomFile = Path.of(project.getLocation().toOSString()).resolve("pom.xml");
+            if (Files.exists(pomFile)) {
+                String artifactId = readMavenArtifactId(pomFile);
+                if (artifactId != null) {
+                    artifactToProject.put(artifactId, project);
+                }
             }
         }
-        return null;
+        return artifactToProject;
+    }
+
+    /**
+     * Returns the workspace project a JAR from the local Maven repository is the build output
+     * of, or {@code null} for a JAR that belongs to no workspace project. E.g.,
+     * "culinarygraph-rdf-api-0.0.1-SNAPSHOT.jar" matches the project with artifactId
+     * "culinarygraph-rdf-api". The project {@code self} never matches its own JAR.
+     *
+     * @see WorkspaceArtifactMatcher
+     */
+    public static IProject findMatchingWorkspaceProject(String jarName,
+            Map<String, IProject> artifactToProject, IProject self) {
+        String artifactId = WorkspaceArtifactMatcher.matchArtifactId(jarName, artifactToProject.keySet());
+        if (artifactId == null) {
+            return null;
+        }
+        IProject matched = artifactToProject.get(artifactId);
+        return matched == null || matched.equals(self) ? null : matched;
     }
 
     /**
