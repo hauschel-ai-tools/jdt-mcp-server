@@ -592,6 +592,21 @@ public class CodeGenerationTools {
                 return new CallToolResult("Cannot modify type (binary or read-only): " + className, true);
             }
 
+            // Only a class, record or enum can implement an interface. An annotation type has no
+            // super interface list at all, and for an interface the entry would land in its
+            // extends list while the generated stubs (with bodies) would not compile.
+            if (type.isAnnotation()) {
+                return new CallToolResult(className
+                        + " is an annotation type and cannot implement an interface. "
+                        + "Pass a class, record or enum as 'className'.", true);
+            }
+            if (type.isInterface()) {
+                return new CallToolResult(className
+                        + " is an interface, not a class. Method stubs with a body would not compile there. "
+                        + "To let an interface extend another one, edit its extends clause; "
+                        + "to derive a new interface from a class, use jdt_extract_interface.", true);
+            }
+
             IType interfaceType = findTypeByName(interfaceName);
             if (interfaceType == null) {
                 return new CallToolResult("Interface not found: " + interfaceName, true);
@@ -1535,8 +1550,10 @@ public class CodeGenerationTools {
 
         ChildListPropertyDescriptor superInterfaces = superInterfaceProperty(typeDecl);
         if (superInterfaces == null) {
-            throw new IllegalStateException(type.getFullyQualifiedName()
-                    + " is an annotation type and cannot implement an interface");
+            // Unreachable for annotation types (rejected in implementInterface); kept as a guard
+            // for any further AbstractTypeDeclaration subclass a future JDT may introduce.
+            throw new IllegalStateException("Declaration of " + type.getFullyQualifiedName()
+                    + " (" + typeDecl.getClass().getSimpleName() + ") has no super interface list");
         }
 
         AST ast = astRoot.getAST();
@@ -1549,8 +1566,8 @@ public class CodeGenerationTools {
 
     /**
      * Helper: The super interface list property of a type declaration -- {@code implements} for
-     * classes, enums and records, {@code extends} for interfaces -- or {@code null} for an
-     * annotation type, which has no such list.
+     * classes, enums and records, {@code extends} for interfaces -- or {@code null} for any
+     * declaration kind that has no such list (today only an annotation type).
      */
     private static ChildListPropertyDescriptor superInterfaceProperty(AbstractTypeDeclaration typeDecl) {
         if (typeDecl instanceof TypeDeclaration) {

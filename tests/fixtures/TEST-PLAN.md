@@ -276,7 +276,7 @@ Call: jdt_find_annotated_elements(annotationName="Tracked")
 Assert: finds BaseProcessor, BatchProcessor, AppService, ExternalService (4 classes, across projects)
 
 Call: jdt_find_annotated_elements(annotationName="Auditable", projectName="fixture-core")
-Assert: finds SimpleProcessor, DataHolder
+Assert: finds SimpleProcessor, DataHolder, AnnotatedTarget (org.fixture.codegen)
 ```
 
 ---

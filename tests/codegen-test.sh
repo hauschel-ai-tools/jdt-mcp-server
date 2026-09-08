@@ -14,6 +14,9 @@
 #   - several annotations plus a bounded type parameter containing "extends"
 #   - a plain class with no clause at all (regression guard)
 #
+# Two further cases pin the targets the tool has to refuse instead of writing an
+# uncompilable file: an annotation type and an interface.
+#
 # Every assertion reads the FILESYSTEM, and each generated file is compiled with
 # javac afterwards: a mangled header can still yield a green tool response.
 #
@@ -30,7 +33,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=lib/mcp-helpers.sh
 source "$SCRIPT_DIR/lib/mcp-helpers.sh"
 
-RPC_TIMEOUT="${RPC_TIMEOUT:-600}"
+# Below the CI step budget (timeout-minutes: 10) on purpose: if a call hangs, the script
+# has to give up first, otherwise the runner kills it before it prints the server stderr.
+RPC_TIMEOUT="${RPC_TIMEOUT:-420}"
 
 # The request counter lives in a file: rpc() runs inside $(...) command
 # substitutions, so a shell variable would be incremented in a subshell and reset
@@ -79,6 +84,8 @@ API_SRC="$PARENT_DIR/fixture-api/src/main/java"
 CORE_SRC="$PARENT_DIR/fixture-core/src/main/java"
 CODEGEN_SRC="$CORE_SRC/org/fixture/codegen"
 TARGET_INTERFACE="org.fixture.api.Configurable"
+TRACKED_ANNOTATION="$API_SRC/org/fixture/api/Tracked.java"
+TRANSFORMER_INTERFACE="$CODEGEN_SRC/Transformer.java"
 
 echo "Fixtures at: $FIXTURE_WORK_DIR"
 
@@ -315,6 +322,63 @@ implement_interface_case() {
     if $ok; then pass "$label"; else fail "$label"; fi
 }
 
+# ── Driver for targets the tool has to refuse ─────────────────────────────────
+# A rejected call must say so (isError) and leave the file untouched — silently
+# writing an implements/extends entry plus method bodies produces a file that
+# does not compile while the tool reports SUCCESS.
+
+reject_case() {
+    local label="$1"
+    local class_name="$2"
+    local file="$3"
+    local expected_fragment="$4"
+
+    echo "[$label] jdt_implement_interface $class_name -> $TARGET_INTERFACE (must be refused)"
+
+    if [ ! -f "$file" ]; then
+        fail "$label" "fixture file missing: $file"
+        return
+    fi
+
+    local before after
+    before=$(md5sum < "$file")
+
+    local response
+    response=$(call_tool "jdt_implement_interface" \
+        "$(jq -cn --arg c "$class_name" --arg i "$TARGET_INTERFACE" \
+            '{"className":$c,"interfaceName":$i,"generateMethodStubs":true}')") \
+        || { fail "$label" "no response"; return; }
+
+    local ok=true
+    local text
+    text=$(echo "$response" | jq -r '.result.content[0].text // empty')
+
+    if [ "$(echo "$response" | jq -r '.result.isError // false')" != "true" ]; then
+        echo "  ASSERTION FAILED: refused target must report isError"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+    if ! echo "$text" | grep -qF "$expected_fragment"; then
+        echo "  ASSERTION FAILED: error message must name the reason ('$expected_fragment')"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+    if echo "$text" | grep -qE "NullPointerException|IllegalStateException"; then
+        echo "  ASSERTION FAILED: refusal must not leak a raw exception"
+        echo "    $(echo "$text" | head -c 400)"
+        ok=false
+    fi
+
+    after=$(md5sum < "$file")
+    if [ "$before" != "$after" ]; then
+        echo "  ASSERTION FAILED: refused target must leave the file unchanged on disk"
+        echo "    file: $file"
+        ok=false
+    fi
+
+    if $ok; then pass "$label"; else fail "$label"; fi
+}
+
 # ── Test 1: plain class, no extends, no implements (regression guard) ─────────
 
 test_plain_class() {
@@ -375,19 +439,45 @@ test_commented_header() {
         'class CommentedTarget +extends +BaseHolder .*implements +Transformer<String>, ?Configurable +\{'
 }
 
-# ── Test 7: the workspace itself stays error free ─────────────────────────────
-# Cross-check through JDT's own markers: the per-case javac run only sees the
-# file it compiles, the marker check sees the whole project.
+# ── Test 7: an annotation type as target is refused ───────────────────────────
 
-test_project_has_no_errors() {
-    echo "[Test 7] fixture-core has no compilation errors after the rewrites"
+test_annotation_type_target() {
+    reject_case \
+        "Test 7 annotation type as target" \
+        "org.fixture.api.Tracked" \
+        "$TRACKED_ANNOTATION" \
+        "annotation type"
+}
+
+# ── Test 8: an interface as target is refused ─────────────────────────────────
+
+test_interface_target() {
+    reject_case \
+        "Test 8 interface as target" \
+        "org.fixture.codegen.Transformer" \
+        "$TRANSFORMER_INTERFACE" \
+        "is an interface, not a class"
+}
+
+# ── Test 9: no compilation errors in the rewritten sources ────────────────────
+# Deliberately scoped to markers under org/fixture/codegen instead of the whole
+# project: fixture-core also carries JUnit test sources whose classpath comes from
+# `mvn dependency:build-classpath`, and that call needs the sibling artifact
+# org.fixture:fixture-api in the local Maven repository. Nothing installs it, so on
+# a clean CI runner the test sources produce unrelated error markers. Do not widen
+# this check back to the whole project — it would measure the state of ~/.m2, not
+# this tool.
+
+test_no_errors_in_rewritten_sources() {
+    echo "[Test 9] no compilation errors in org/fixture/codegen after the rewrites"
 
     call_tool "jdt_refresh_project" '{"projectName":"fixture-core"}' > /dev/null || true
 
     local elapsed=0 error_count="" err_text=""
     while [ "$elapsed" -lt 60 ]; do
         err_text=$(tool_text "$(call_tool "jdt_get_compilation_errors" '{"projectName":"fixture-core"}')")
-        error_count=$(echo "$err_text" | jq -r '.errorCount // empty' 2>/dev/null || true)
+        error_count=$(echo "$err_text" \
+            | jq -r '[.errors[]? | select(.file | contains("/org/fixture/codegen/"))] | length' 2>/dev/null || true)
         if [ "$error_count" = "0" ]; then
             break
         fi
@@ -396,11 +486,13 @@ test_project_has_no_errors() {
     done
 
     if [ "$error_count" = "0" ]; then
-        pass "fixture-core free of compilation errors"
+        pass "org/fixture/codegen free of compilation errors"
     else
-        echo "  ASSERTION FAILED: expected errorCount 0, got '${error_count:-<none>}'"
-        echo "$err_text" | jq -r '.errors[]? | "    \(.file):\(.lineNumber) \(.message)"' 2>/dev/null | head -12
-        fail "fixture-core free of compilation errors"
+        echo "  ASSERTION FAILED: expected 0 errors under org/fixture/codegen, got '${error_count:-<none>}'"
+        echo "$err_text" \
+            | jq -r '.errors[]? | select(.file | contains("/org/fixture/codegen/")) | "    \(.file):\(.lineNumber) \(.message)"' \
+              2>/dev/null | head -12
+        fail "org/fixture/codegen free of compilation errors"
     fi
 }
 
@@ -414,7 +506,9 @@ test_annotated_generic_class
 test_record
 test_sealed_class
 test_commented_header
-test_project_has_no_errors
+test_annotation_type_target
+test_interface_target
+test_no_errors_in_rewritten_sources
 
 print_summary
 
