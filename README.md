@@ -400,7 +400,7 @@ tests/codegen-test.sh [path/to/jdt-mcp-binary]
 
 Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüfen, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet und `jdt_maven_update_project` Geschwistermodule als Projektreferenz führt statt als `~/.m2`-Jar — auch transitiv aufgelöste:
 
-Die Reaktor-Geschwister müssen dafür als Jar auflösbar sein, das Skript installiert sie deshalb mit ihren echten Koordinaten (`org.fixture:*`) ins lokale Repository, sichert einen vorhandenen `org/fixture`-Baum vorher und stellt den Ausgangszustand am Ende wieder her (`M2_REPO` überschreibt den Pfad). Ohne Netz werden die `jdt_maven_update_project`-Tests übersprungen statt rot; `JDTMCP_REQUIRE_MAVEN=1` macht daraus einen harten Fehler.
+Die Reaktor-Geschwister müssen dafür als Jar auflösbar sein, das Skript installiert sie deshalb mit ihren echten Koordinaten (`org.fixture:*`) ins lokale Maven-Repository, sichert einen vorhandenen `org/fixture`-Baum vorher und stellt den Ausgangszustand am Ende wieder her — auch bei Strg-C. Das Repository ist dabei **nicht** isoliert: der Server ruft `mvn dependency:build-classpath` selbst auf und benutzt das konfigurierte lokale Repository, ein `-Dmaven.repo.local` im Test würde also auseinanderlaufen. Der Pfad wird deshalb bei Maven erfragt statt überschrieben; echte Isolation ist [#124](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/124). Ohne Netz werden die `jdt_maven_update_project`-Tests übersprungen statt rot; `JDTMCP_REQUIRE_MAVEN=1` macht daraus einen harten Fehler.
 
 ```bash
 tests/buildpath-test.sh [path/to/jdt-mcp-binary]

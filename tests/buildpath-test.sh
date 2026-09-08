@@ -17,8 +17,14 @@
 # resolvable as JARs, so the fixture modules are installed with their real coordinates
 # (org.fixture:*:1.0.0-SNAPSHOT) into the local repository. Any pre-existing org/fixture tree
 # is moved aside first and restored on exit; artifacts installed by this run are removed
-# again, so the repository is left as it was found. Set M2_REPO to point at a different local
-# repository.
+# again, so the repository is left as it was found.
+#
+# The repository is NOT isolated from the developer's or the CI cache: the server resolves
+# dependencies by shelling out to 'mvn dependency:build-classpath' itself
+# (ProjectImporter.addMavenDependencies), which uses whatever local repository Maven is
+# configured with. Passing -Dmaven.repo.local here would only redirect this script's own
+# install and leave the server looking somewhere else. The path is therefore asked of Maven
+# instead of overridden. Real isolation needs a repository override the server respects: #124.
 #
 # NO NETWORK: if the install fails, the #116 tests are skipped instead of failing the suite -
 # nothing about the server is broken then. Set JDTMCP_REQUIRE_MAVEN=1 to make it an error.
@@ -90,7 +96,13 @@ APP_CLASSPATH="$PARENT_DIR/fixture-app/.classpath"
 
 SERVER_LOG="$HOME/.jdt-mcp/jdt-mcp-$(basename "$SERVER_CWD").log"
 
-M2_REPO="${M2_REPO:-$HOME/.m2/repository}"
+# Ask Maven for the local repository rather than assuming ~/.m2/repository: whatever it
+# answers is what the server's own 'mvn' shell-out will use too, so backup and restore below
+# act on the directory that actually gets written.
+M2_REPO="$(mvn -B -q help:evaluate -Dexpression=settings.localRepository -DforceStdout 2>/dev/null | tail -1 || true)"
+if [ -z "$M2_REPO" ] || [ ! -d "$M2_REPO" ]; then
+    M2_REPO="$HOME/.m2/repository"
+fi
 FIXTURE_ARTIFACTS_DIR="$M2_REPO/org/fixture"
 FIXTURE_ARTIFACTS_PREEXISTING=0
 M2_BACKUP=""
@@ -117,7 +129,12 @@ restore_local_repository() {
     return 0
 }
 
+CLEANUP_DONE=0
 cleanup_all() {
+    if [ "$CLEANUP_DONE" = "1" ]; then
+        return 0
+    fi
+    CLEANUP_DONE=1
     cleanup
     restore_local_repository
     [ -d "$FIXTURE_WORK_DIR" ] && rm -rf "$FIXTURE_WORK_DIR"
@@ -125,7 +142,20 @@ cleanup_all() {
     [ -f "$RPC_ID_FILE" ] && rm -f "$RPC_ID_FILE"
     return 0
 }
+
+# Bash does not run the EXIT trap when a signal interrupts a foreground child - and this
+# script spends most of its time in `sleep` inside the poll loops. Without an INT/TERM trap,
+# Ctrl-C would leave the backed-up org/fixture tree in a temp directory and the local
+# repository without it. The handler exits itself so the script cannot carry on with a
+# cleaned-up workspace; CLEANUP_DONE keeps the EXIT trap that follows from repeating the work.
+on_signal() {
+    cleanup_all
+    trap - EXIT
+    exit "$1"
+}
 trap cleanup_all EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # ── Install the reactor siblings into the local Maven repository ──────────────
 # Without this 'mvn dependency:build-classpath' fails for fixture-app and the whole #116
@@ -142,7 +172,7 @@ if [ -d "$FIXTURE_ARTIFACTS_DIR" ]; then
 fi
 
 if mvn -q -B -f "$PARENT_DIR/pom.xml" -pl fixture-api,fixture-core -am \
-        -Dmaven.repo.local="$M2_REPO" -DskipTests install \
+        -DskipTests install \
         > "$FIXTURE_WORK_DIR/mvn-install.log" 2>&1; then
     MAVEN_FIXTURES_AVAILABLE=1
     echo "  installed"
