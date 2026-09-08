@@ -3,7 +3,7 @@
 
 <product
       name="JDT MCP Server"
-      uid="jdtls-mcp"
+      uid="jdt-mcp"
       id="org.naturzukunft.jdt.mcp.product"
       application="org.naturzukunft.jdt.mcp.headless"
       version="1.0.0"

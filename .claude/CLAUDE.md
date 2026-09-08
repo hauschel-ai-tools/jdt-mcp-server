@@ -37,7 +37,7 @@ In Eclipse: Help → Install New Software → Add → Local → obigen Pfad wäh
 
 Die übergeordnete Regel "JDT MCP statt mvn direkt" gilt hier nicht. Dieses Repo ist das
 Werkzeug selbst: der per `.mcp.json` gestartete Server ist die Installation unter
-`~/.local/share/jdtls-mcp`, also ein anderer Stand als der Branch. Er kann eine Änderung
+`~/.local/share/jdt-mcp`, also ein anderer Stand als der Branch. Er kann eine Änderung
 am Server weder prüfen noch ausführen. Verifikation stattdessen:
 
 - Modul-Build: `mvn -pl org.naturzukunft.jdt.mcp -am compile` (mit obigen `MAVEN_OPTS`)

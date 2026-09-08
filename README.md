@@ -122,7 +122,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 |---|---|---|---|
 | Linux | x86_64, aarch64 | `curl ... \| bash` | tar.gz |
 | macOS | x86_64, aarch64 (Apple Silicon) | `curl ... \| bash` | tar.gz |
-| Windows | x86_64 | - | zip + `jdtls-mcp.cmd` |
+| Windows | x86_64 | - | zip + `jdt-mcp.cmd` |
 
 ## Installation (Linux & macOS)
 
@@ -130,7 +130,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.sh | bash
 ```
 
-Das Script erkennt OS und Architektur, lädt die neueste Version herunter, installiert nach `~/.local/share/jdtls-mcp/` und konfiguriert Claude Code automatisch.
+Das Script erkennt OS und Architektur, lädt die neueste Version herunter, installiert nach `~/.local/share/jdt-mcp/` und konfiguriert Claude Code automatisch.
 
 Danach:
 
@@ -138,6 +138,38 @@ Danach:
 cd /dein/java-projekt
 claude
 ```
+
+### Marketplace-Plugin (Claude Code)
+
+Alternative zu `install.sh`: dieses Repo ist selbst ein Claude-Code-Plugin
+(`.claude-plugin/plugin.json` + `.mcp.json`). Über einen Marketplace installiert
+(`/plugin marketplace add ...` bzw. das Marketplace-übliche `/plugin install`) bringt
+das Plugin die MCP-Server-Registrierung selbst mit — es ist kein separates
+`install.sh` nötig, um `jdt-mcp` als Server bekannt zu machen.
+
+Der Server braucht trotzdem den Launcher-Binary. Die Plugin-`.mcp.json` startet ihn über
+einen absoluten, `${HOME}`-expandierten Pfad (`${HOME}/.local/share/jdt-mcp/bin/jdt-mcp`) statt
+über den bloßen Befehlsnamen `jdt-mcp` — der Prozess, der MCP-Server startet, hat nicht
+zwangsläufig `~/.local/bin` im PATH (viele `.profile`-Setups erweitern PATH nur für Login-Shells).
+Dafür läuft beim Session-Start ein `SessionStart`-Hook (`hooks/ensure-server.sh`): fehlt der
+Launcher (`~/.local/bin/jdt-mcp` bzw. `~/.local/share/jdt-mcp/bin/jdt-mcp`), führt er `install.sh`
+aus dem Plugin-Verzeichnis aus — mit `JDTMCP_SKIP_CLAUDE=1`, installiert also **nur** den
+Launcher, ohne zusätzlich `claude mcp add` aufzurufen (das übernimmt bereits die `.mcp.json` des
+Plugins). Fehlt Java 21+ oder Netzzugriff, meldet der Hook das als Kontext-Hinweis in der Session,
+statt die Session zu blockieren (Exit 0 in jedem Fall, mit Timeout um den `install.sh`-Aufruf).
+`install.sh` selbst serialisiert parallele Läufe (z.B. zwei gleichzeitig gestartete Sessions ohne
+Launcher) über einen `mkdir`-Lock mit Erkennung verwaister Locks — eine zweite Session wartet kurz
+und überspringt Download/Entpacken dann, statt zwei Installationen gegeneinander laufen zu lassen.
+
+**Schon eine Standalone-Installation per `install.sh` vorhanden** (also `jdt-mcp` bereits via
+`claude mcp add -s user jdt-mcp ...` im User-Scope registriert)? Dann NICHT zusätzlich das
+Marketplace-Plugin aktivieren — beide Registrierungen sind unterschiedlich benannt
+(`mcp__jdt-mcp__*` im User-Scope vs. `mcp__plugin_jdt-mcp-server_jdt-mcp__*` im Plugin-Scope)
+und würden nebeneinander laufen, also zwei separate Server-Prozesse gegen denselben
+Eclipse-Workspace eines Arbeitsverzeichnisses starten. Der Workspace-Mutation-Lock im Server
+ist ein prozessinterner `ReentrantLock` und schützt nicht vor einer zweiten JVM auf demselben
+Workspace. Wer beides ausprobiert hat: entweder das Plugin deaktivieren, oder die
+User-Scope-Registrierung entfernen (`claude mcp remove -s user jdt-mcp`) und beim Plugin bleiben.
 
 ### Update
 
@@ -149,10 +181,12 @@ curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.s
 
 Das Script erkennt die bestehende Installation und zeigt den Update-Pfad an (z.B. `Update: 0.2.1 -> 0.2.2`).
 
+Der Launcher hieß bis v1.1.0 `jdtls-mcp`. Beim Update von einer älteren Version entfernt `install.sh` automatisch die Alt-Installation unter `~/.local/share/jdtls-mcp` (~180 MB) sowie den alten Symlink `~/.local/bin/jdtls-mcp`. Wer den Pfad manuell in `claude mcp add` eingetragen hatte (statt über dieses Script), muss die Registrierung selbst auf `jdt-mcp` (siehe unten) umstellen.
+
 Installierte Version prüfen:
 
 ```bash
-jdtls-mcp --version
+jdt-mcp --version
 ```
 
 ### Installation aus lokalem Build
@@ -172,7 +206,7 @@ curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/uninstall
 Oder manuell:
 
 ```bash
-rm -rf ~/.local/share/jdtls-mcp ~/.local/bin/jdtls-mcp
+rm -rf ~/.local/share/jdt-mcp ~/.local/bin/jdt-mcp
 claude mcp remove jdt-mcp
 ```
 
@@ -183,11 +217,11 @@ claude mcp remove jdt-mcp
 # https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
 # Entpacken
-mkdir -p ~/.local/share/jdtls-mcp
-tar xzf jdtls-mcp-linux.gtk.x86_64.tar.gz -C ~/.local/share/jdtls-mcp
+mkdir -p ~/.local/share/jdt-mcp
+tar xzf jdt-mcp-linux.gtk.x86_64.tar.gz -C ~/.local/share/jdt-mcp
 
 # Claude Code konfigurieren
-claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
+claude mcp add -s user jdt-mcp ~/.local/share/jdt-mcp/bin/jdt-mcp
 ```
 
 ### Manuelle Installation (Windows)
@@ -196,11 +230,11 @@ claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
 # ZIP-Archiv herunterladen von:
 # https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
-# Entpacken (z.B. nach %LOCALAPPDATA%\jdtls-mcp)
-Expand-Archive jdtls-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdtls-mcp"
+# Entpacken (z.B. nach %LOCALAPPDATA%\jdt-mcp)
+Expand-Archive jdt-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdt-mcp"
 
 # Claude Code konfigurieren
-claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
+claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdt-mcp\bin\jdt-mcp.cmd"
 ```
 
 ### Erweiterte Optionen
@@ -213,7 +247,7 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 
 ```bash
 # HTTP-Modus (für Debugging)
-jdtls-mcp --http
+jdt-mcp --http
 ```
 
 ## Workspace-Management
@@ -298,7 +332,7 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 
 1. Log prüfen: `~/.jdt-mcp/jdt-mcp-<projektname>.log`
 2. Java-Version prüfen: `java -version` (21+ erforderlich)
-3. Binary testen: `jdtls-mcp` direkt ausführen, stderr-Ausgabe beobachten
+3. Binary testen: `jdt-mcp` direkt ausführen, stderr-Ausgabe beobachten
 
 ### Veraltete Daten nach Dateiänderungen
 
@@ -332,7 +366,7 @@ pkill -CONT -f jdtmcp.headless; pkill -TERM -f jdtmcp.headless
 Der Server hat stdio-basierte Smoke Tests, die den MCP-Protokoll-Handshake und grundlegende Tool-Aufrufe prüfen:
 
 ```bash
-tests/smoke-test.sh [path/to/jdtls-mcp-binary]
+tests/smoke-test.sh [path/to/jdt-mcp-binary]
 ```
 
 Ohne Argument wird das Binary aus dem lokalen Build verwendet.
@@ -342,7 +376,7 @@ Ohne Argument wird das Binary aus dem lokalen Build verwendet.
 Prüfen, dass die Server-JVM ihren Client nie überlebt (stdin-EOF, Signal-Weiterleitung, Parent-Death-Erkennung, eigene Prozessgruppe):
 
 ```bash
-tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
+tests/lifecycle-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ### Refactoring-Tests (End-to-End)
@@ -350,7 +384,7 @@ tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
 Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-external` als zwei getrennte Projekte und prüfen nach jedem Refactoring den Zustand **auf der Festplatte**, nicht die Tool-Antwort — im Headless-Modus meldete ein Refactoring schon Erfolg, während die Änderungen nur im Puffer standen:
 
 ```bash
-tests/refactoring-test.sh [path/to/jdtls-mcp-binary]
+tests/refactoring-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ## Lizenz

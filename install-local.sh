@@ -19,7 +19,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRODUCT_DIR="$SCRIPT_DIR/org.naturzukunft.jdt.mcp.product/target/products"
-INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdtls-mcp}"
+INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdt-mcp}"
 BIN_DIR="$HOME/.local/bin"
 SKIP_BUILD="${JDTMCP_SKIP_BUILD:-0}"
 SKIP_CLAUDE="${JDTMCP_SKIP_CLAUDE:-0}"
@@ -58,7 +58,7 @@ find_archive() {
         *)             error "Nicht unterstützte Architektur: $arch" ;;
     esac
 
-    ARCHIVE="$PRODUCT_DIR/jdtls-mcp-${platform}.${arch}.tar.gz"
+    ARCHIVE="$PRODUCT_DIR/jdt-mcp-${platform}.${arch}.tar.gz"
 
     if [ ! -f "$ARCHIVE" ]; then
         error "Build-Archiv nicht gefunden: $ARCHIVE\n    Erst bauen mit: ./install-local.sh (oder JDTMCP_SKIP_BUILD=0)"
@@ -76,7 +76,7 @@ install() {
 
     mkdir -p "$INSTALL_DIR"
     tar xzf "$ARCHIVE" -C "$INSTALL_DIR" --warning=no-unknown-keyword
-    chmod +x "$INSTALL_DIR/bin/jdtls-mcp"
+    chmod +x "$INSTALL_DIR/bin/jdt-mcp"
 
     # Write version file for --version flag
     local version="dev-local"
@@ -88,9 +88,9 @@ install() {
     echo "$version" > "$INSTALL_DIR/.version"
 
     mkdir -p "$BIN_DIR"
-    ln -sf "$INSTALL_DIR/bin/jdtls-mcp" "$BIN_DIR/jdtls-mcp"
+    ln -sf "$INSTALL_DIR/bin/jdt-mcp" "$BIN_DIR/jdt-mcp"
     info "Installiert nach $INSTALL_DIR"
-    info "Symlink: $BIN_DIR/jdtls-mcp"
+    info "Symlink: $BIN_DIR/jdt-mcp"
 }
 
 # --- Claude Code konfigurieren ---
@@ -101,7 +101,7 @@ configure_claude() {
     fi
 
     local claude_settings="$HOME/.claude.json"
-    local launcher="$INSTALL_DIR/bin/jdtls-mcp"
+    local launcher="$INSTALL_DIR/bin/jdt-mcp"
 
     if ! command -v claude &>/dev/null && [ ! -f "$claude_settings" ]; then
         warn "Claude Code nicht gefunden - überspringe Konfiguration"
@@ -151,7 +151,7 @@ main() {
     echo -e "${BOLD}Installation abgeschlossen!${NC}"
     echo ""
     echo "  Installation:  $INSTALL_DIR"
-    echo "  Befehl:        jdtls-mcp"
+    echo "  Befehl:        jdt-mcp"
     echo ""
 
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then

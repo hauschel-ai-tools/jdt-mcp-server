@@ -1,0 +1,16 @@
+{
+  "description": "SessionStart hook that ensures the jdt-mcp launcher binary is installed, so this plugin's own .mcp.json server entry (command: jdt-mcp) actually finds something to run instead of just a dangling config entry (#106).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/ensure-server.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
