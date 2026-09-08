@@ -132,7 +132,7 @@ public class HeadlessApplication implements IApplication {
             List<IProject> allProjects = new java.util.ArrayList<>();
             for (Path root : importRoots) {
                 List<IProject> projects = ProjectImporter.importFromDirectory(
-                        root, new NullProgressMonitor());
+                        root, new NullProgressMonitor()).projects();
                 allProjects.addAll(projects);
             }
 
@@ -200,9 +200,9 @@ public class HeadlessApplication implements IApplication {
 
         Thread importThread = new Thread(() -> {
             try {
-                ProjectImporter.resetImportStatistics();
-                List<IProject> projects = ProjectImporter.importFromDirectory(
+                ProjectImporter.ImportResult imported = ProjectImporter.importFromDirectory(
                         Path.of(workDir), new NullProgressMonitor());
+                List<IProject> projects = imported.projects();
 
                 McpLogger.info("HeadlessApplication", "Imported " + projects.size() + " project(s):");
                 for (IProject project : projects) {
@@ -216,7 +216,7 @@ public class HeadlessApplication implements IApplication {
                 desc.setAutoBuilding(true);
                 workspace.setDescription(desc);
 
-                int buildKind = startupBuildKind();
+                int buildKind = startupBuildKind(imported);
                 McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering "
                         + (buildKind == IncrementalProjectBuilder.FULL_BUILD ? "full" : "incremental")
                         + " workspace build...");
@@ -269,23 +269,23 @@ public class HeadlessApplication implements IApplication {
     /**
      * Chooses the build kind for the build that follows the startup import.
      *
-     * <p>A project whose classpath had to be re-resolved (its POM changed while no session was
-     * running, see {@link MavenClasspathFreshness}) carries a saved build state that was produced
-     * against the old classpath, plus the problem markers that go with it. An incremental build
-     * over that state is not enough to clear them reliably, so a re-resolved workspace is built in
-     * full.
+     * <p>A reopened project brings the saved build state and the persisted problem markers of an
+     * earlier session with it. An incremental build over that state does nothing when Eclipse sees
+     * no resource delta, so markers that describe a problem which no longer exists survive the
+     * restart -- the second half of #114. Whatever changed while no session was running (a JAR that
+     * appeared in the local repository, a re-resolved classpath) is invisible to that delta, so as
+     * soon as a single project was reopened, the workspace is built in full and every marker is
+     * produced by this session.
      *
-     * <p>Reopening an unchanged workspace -- the common case, since clients restart the server
-     * often -- stays incremental on purpose: a full build of a workspace with dozens of modules
-     * costs a recompile of everything at every start, and the refresh done while reopening
-     * (see {@code ProjectImporter#reopenExistingProject}) already gives the incremental build the
-     * resource delta it needs for anything that changed on disk meanwhile.
+     * <p>The decision is taken from this import run's own result, not from a shared counter:
+     * {@code jdt_import_project} and {@code jdt_reload_workspace} are exempt from the readiness
+     * gate and can run while the startup import is still going.
      */
-    private static int startupBuildKind() {
-        int reconfigured = ProjectImporter.getReconfiguredProjectCount();
-        if (reconfigured > 0) {
-            McpLogger.info("HeadlessApplication", reconfigured + " reopened project(s) needed a fresh classpath — "
-                    + "building the workspace in full to drop build state and markers of the previous session");
+    private static int startupBuildKind(ProjectImporter.ImportResult imported) {
+        if (imported.reopened() > 0) {
+            McpLogger.info("HeadlessApplication", imported.reopened() + " project(s) reopened from an earlier "
+                    + "session (" + imported.reconfigured() + " needed a fresh classpath) — building the workspace "
+                    + "in full so no build state or marker of that session survives");
             return IncrementalProjectBuilder.FULL_BUILD;
         }
         return IncrementalProjectBuilder.INCREMENTAL_BUILD;

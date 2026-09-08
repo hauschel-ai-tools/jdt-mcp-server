@@ -156,9 +156,18 @@ public record MavenCompilerCompliance(String version, String propertyKey, Path p
      * Resolves the {@code <parent>} POM of {@code pomFile} on disk, via its {@code <relativePath>}
      * (default {@code ../pom.xml}, an explicit empty value meaning "do not look on disk").
      *
+     * <p>A POM that exists at the relative path is only accepted when it carries the groupId and
+     * artifactId the {@code <parent>} block declares -- the same check Maven makes before falling
+     * back to the repository. Without it, a single project whose POM declares an external parent
+     * would adopt whatever unrelated {@code pom.xml} happens to sit in the directory above it, and
+     * inherit that project's compiler settings (and, via {@link MavenClasspathFreshness}, its
+     * modification times). Values the candidate does not declare itself are inherited from its own
+     * parent and therefore not compared.
+     *
      * @return the ancestor POM path, or {@link Optional#empty()} when the POM declares no parent,
-     *         suppresses the relative path, or cannot be parsed. The returned path is not checked
-     *         for existence -- callers decide what a missing ancestor means for them.
+     *         suppresses the relative path, cannot be parsed, or the POM at the relative path is a
+     *         different artifact. A path that simply does not exist is returned as-is -- callers
+     *         decide what a missing ancestor means for them.
      */
     public static Optional<Path> parentPomOf(Path pomFile) {
         Path normalized = pomFile.toAbsolutePath().normalize();
@@ -183,9 +192,35 @@ public record MavenCompilerCompliance(String version, String propertyKey, Path p
             if (Files.isDirectory(parentPom)) {
                 parentPom = parentPom.resolve("pom.xml");
             }
+            if (Files.isRegularFile(parentPom) && !declaresArtifact(parentPom, parent)) {
+                return Optional.empty();
+            }
             return Optional.of(parentPom);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Checks that the POM at {@code candidate} is the artifact the {@code <parent>} block declares.
+     * Only compares what the candidate states itself: a POM that inherits its groupId or version
+     * from its own parent does not repeat them, and a missing value must not count as a mismatch.
+     */
+    private static boolean declaresArtifact(Path candidate, Element parentElement) {
+        Element candidateRoot;
+        try {
+            candidateRoot = parse(candidate).getDocumentElement();
+        } catch (Exception e) {
+            return false;
+        }
+        return matches(candidateRoot, parentElement, "groupId")
+                && matches(candidateRoot, parentElement, "artifactId")
+                && matches(candidateRoot, parentElement, "version");
+    }
+
+    private static boolean matches(Element candidateRoot, Element parentElement, String tagName) {
+        String declared = childText(parentElement, tagName);
+        String actual = childText(candidateRoot, tagName);
+        return declared == null || actual == null || declared.equals(actual);
     }
 
     /** Resolves a single {@code ${key}} placeholder against {@code properties}, one level deep. */

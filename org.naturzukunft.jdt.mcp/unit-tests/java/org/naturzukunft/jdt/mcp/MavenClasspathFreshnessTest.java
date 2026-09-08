@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Unit tests for {@link MavenClasspathFreshness} (issue #114): deciding from file timestamps
- * whether a generated {@code .classpath} still matches the module's POM chain.
+ * Unit tests for {@link MavenClasspathFreshness} (issue #114): deciding from a stored fingerprint
+ * of the POM chain whether a generated {@code .classpath} still matches the module's POMs.
  */
 class MavenClasspathFreshnessTest {
 
@@ -52,49 +52,83 @@ class MavenClasspathFreshnessTest {
             """;
 
     @Test
-    @DisplayName("classpath newer than the whole POM chain is current")
-    void freshClasspath(@TempDir Path root) throws IOException {
+    @DisplayName("stored fingerprint still matches the POM chain: current")
+    void unchangedChain(@TempDir Path root) throws IOException {
         Path moduleDir = layout(root);
-        write(moduleDir.resolve(".classpath"), CLASSPATH, hoursAgo(1));
 
-        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(moduleDir));
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+
+        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(moduleDir, stamp));
+    }
+
+    @Test
+    @DisplayName("a POM touched without a content change stays current — JDT does not rewrite "
+            + ".classpath, so the fingerprint must not be anchored to it")
+    void pomTouchedWithoutContentChange(@TempDir Path root) throws IOException {
+        Path moduleDir = layout(root);
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+
+        // First start after `git checkout`: the mtime moved, so the module is re-resolved once...
+        touch(moduleDir.resolve("pom.xml"), Instant.now());
+        assertTrue(MavenClasspathFreshness.staleReason(moduleDir, stamp).isPresent(),
+                "a moved mtime is a change we cannot tell apart from a real one");
+
+        // ...and the fingerprint taken afterwards settles it, instead of re-triggering forever.
+        String afterResolution = MavenClasspathFreshness.fingerprint(moduleDir);
+        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(moduleDir, afterResolution));
     }
 
     @Test
     @DisplayName("missing .classpath is stale — nothing was ever resolved")
     void missingClasspath(@TempDir Path root) throws IOException {
         Path moduleDir = layout(root);
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+        Files.delete(moduleDir.resolve(".classpath"));
 
-        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir);
+        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
 
         assertTrue(reason.isPresent());
         assertEquals("no .classpath yet", reason.get());
     }
 
     @Test
-    @DisplayName("module POM newer than .classpath is stale")
-    void modulePomTouched(@TempDir Path root) throws IOException {
+    @DisplayName("no stored fingerprint is stale — a workspace from before the stamp existed")
+    void noStampStored(@TempDir Path root) throws IOException {
         Path moduleDir = layout(root);
-        write(moduleDir.resolve(".classpath"), CLASSPATH, hoursAgo(2));
-        touch(moduleDir.resolve("pom.xml"), Instant.now());
 
-        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir);
+        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, null);
 
-        assertTrue(reason.isPresent(), "module pom.xml is newer, expected stale");
+        assertTrue(reason.isPresent());
+        assertEquals("no record of an earlier classpath resolution", reason.get());
+    }
+
+    @Test
+    @DisplayName("module POM changed since the stored fingerprint is stale")
+    void modulePomChanged(@TempDir Path root) throws IOException {
+        Path moduleDir = layout(root);
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+        write(moduleDir.resolve("pom.xml"), MODULE_POM.replace("</project>", "  <!-- a dependency -->\n</project>"),
+                Instant.now());
+
+        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
+
+        assertTrue(reason.isPresent(), "module pom.xml changed, expected stale");
         assertTrue(reason.get().contains("module/pom.xml"), reason.orElse(""));
     }
 
     @Test
-    @DisplayName("ancestor POM newer than .classpath is stale — dependencyManagement lives there")
-    void parentPomTouched(@TempDir Path root) throws IOException {
+    @DisplayName("ancestor POM changed since the stored fingerprint is stale — "
+            + "dependencyManagement lives there")
+    void parentPomChanged(@TempDir Path root) throws IOException {
         Path moduleDir = layout(root);
-        write(moduleDir.resolve(".classpath"), CLASSPATH, hoursAgo(2));
-        touch(root.resolve("pom.xml"), Instant.now());
+        String stamp = MavenClasspathFreshness.fingerprint(moduleDir);
+        write(root.resolve("pom.xml"), PARENT_POM.replace("</project>", "  <!-- version bump -->\n</project>"),
+                Instant.now());
 
-        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir);
+        Optional<String> reason = MavenClasspathFreshness.staleReason(moduleDir, stamp);
 
-        assertTrue(reason.isPresent(), "parent pom.xml is newer, expected stale");
-        assertTrue(reason.get().endsWith("is newer than .classpath"), reason.orElse(""));
+        assertTrue(reason.isPresent(), "parent pom.xml changed, expected stale");
+        assertTrue(reason.get().endsWith("changed since the last classpath resolution"), reason.orElse(""));
     }
 
     @Test
@@ -102,7 +136,7 @@ class MavenClasspathFreshnessTest {
     void notAMavenModule(@TempDir Path root) throws IOException {
         Files.createDirectories(root.resolve("plain"));
 
-        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(root.resolve("plain")));
+        assertEquals(Optional.empty(), MavenClasspathFreshness.staleReason(root.resolve("plain"), null));
     }
 
     @Test
@@ -117,14 +151,31 @@ class MavenClasspathFreshnessTest {
         assertEquals(root.resolve("pom.xml").toAbsolutePath().normalize(), chain.get(1));
     }
 
+    @Test
+    @DisplayName("an unrelated pom.xml one directory up is not adopted as parent")
+    void foreignPomIsNotTheParent(@TempDir Path root) throws IOException {
+        Path moduleDir = layout(root);
+        write(root.resolve("pom.xml"), PARENT_POM.replace("<artifactId>parent</artifactId>",
+                "<artifactId>somebody-elses-project</artifactId>"), Instant.now());
+
+        List<Path> chain = MavenClasspathFreshness.pomChain(moduleDir.resolve("pom.xml"));
+
+        assertEquals(List.of(moduleDir.resolve("pom.xml").toAbsolutePath().normalize()), chain,
+                "the POM above declares a different artifact, it must not enter the chain");
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    /** Writes an aggregator POM with one module POM below it and returns the module directory. */
+    /**
+     * Writes an aggregator POM with one module POM and a generated {@code .classpath} below it, and
+     * returns the module directory.
+     */
     private static Path layout(Path root) throws IOException {
         Path moduleDir = root.resolve("module");
         Files.createDirectories(moduleDir);
         write(root.resolve("pom.xml"), PARENT_POM, hoursAgo(3));
         write(moduleDir.resolve("pom.xml"), MODULE_POM, hoursAgo(3));
+        write(moduleDir.resolve(".classpath"), CLASSPATH, hoursAgo(3));
         return moduleDir;
     }
 

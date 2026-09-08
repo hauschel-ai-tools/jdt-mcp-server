@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # E2E test for issue #114: reopening an already imported Maven multi-module workspace must not
-# produce false-positive build path errors.
+# produce false-positive build path errors, and must not re-resolve the classpath over and over.
 #
-# Two independent causes, one per phase:
-#   B) stale .classpath  — a previous import wrote .classpath, the POM changed afterwards.
-#      The reopened project must re-resolve its classpath instead of reusing the stale file.
-#   C/D) stale resource tree / markers — sources changed on disk while the server was down.
-#      The reopened project must be refreshed and rebuilt, so neither new errors are missed (C)
-#      nor fixed errors keep being reported (D).
+# Phases (all on ONE Eclipse workspace and one server working directory, so every restart after
+# phase A goes through "Opened existing project"):
+#   A  first import into an empty workspace
+#   B  stale .classpath: the POM gained dependencies since the last import
+#   C  a source file was broken on disk while the server was down
+#   D  that source file was repaired while the server was down
+#   E  a POM was touched without a content change (`git checkout`): re-resolves once, then settles
+#   F  a POM changed for real: re-resolves exactly once
 #
-# All four phases share one Eclipse workspace (JDTMCP_WORKSPACE) and one server working
-# directory, so every restart hits the "Opened existing project" path in ProjectImporter.
-# Assertions are made on disk (.classpath content) as well as on the tool answer.
+# Every phase asserts against the server log as well, otherwise the whole suite could pass on a
+# server that silently imported everything from scratch instead of reopening.
 #
 # Requires: bash, jq, mkfifo, mvn (the importer shells out to dependency:build-classpath)
 #
@@ -28,6 +29,7 @@ source "$SCRIPT_DIR/lib/mcp-helpers.sh"
 
 MODULE_NAME="fixture-api"
 GHOST_JAR="/nonexistent/ghost-lib-9.9.9.jar"
+EXPECTED_COMPLIANCE="compliance 21 from"
 
 RPC_ID_FILE="$(mktemp)"
 echo 0 > "$RPC_ID_FILE"
@@ -61,10 +63,12 @@ find_binary() {
 BINARY=$(find_binary "${1:-}")
 echo "Using binary: $BINARY"
 
-if ! command -v mvn >/dev/null 2>&1; then
-    echo "ERROR: mvn not on PATH — the importer needs it to resolve module dependencies." >&2
-    exit 1
-fi
+for tool in jq mvn mkfifo; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "ERROR: $tool not on PATH — this test needs it." >&2
+        exit 1
+    fi
+done
 
 # ── Prepare fixture and workspace ──────────────────────────────────────────────
 
@@ -73,9 +77,14 @@ cp -r "$SCRIPT_DIR/fixtures/fixture-parent" "$FIXTURE_WORK_DIR/"
 PROJECT_DIR="$FIXTURE_WORK_DIR/fixture-parent"
 MODULE_DIR="$PROJECT_DIR/$MODULE_NAME"
 CLASSPATH_FILE="$MODULE_DIR/.classpath"
+MODULE_POM="$MODULE_DIR/pom.xml"
 SOURCE_FILE="$MODULE_DIR/src/main/java/org/fixture/api/Tracked.java"
 SOURCE_BACKUP="$FIXTURE_WORK_DIR/Tracked.java.orig"
 cp "$SOURCE_FILE" "$SOURCE_BACKUP"
+
+# A checkout may carry a .classpath from an earlier local run of the fixture — start from a clean
+# slate so the first phase really is a first import.
+find "$PROJECT_DIR" -name '.classpath' -delete
 
 # One workspace for all phases — reopening it is what this test is about.
 export JDTMCP_WORKSPACE="$FIXTURE_WORK_DIR/workspace"
@@ -85,6 +94,12 @@ export JDTMCP_RECOVERY=1
 
 SERVER_LOG="$HOME/.jdt-mcp/jdt-mcp-$(basename "$PROJECT_DIR").log"
 SERVER_WORK_DIRS=()
+LOG_OFFSET=0
+PHASE_OK=true
+
+# Answers of the last jdt_get_compilation_errors call, kept in a file: error_count_of() runs in a
+# command substitution, so a shell variable set inside it would not survive.
+LAST_ANSWER_FILE="$(mktemp)"
 
 cleanup_all() {
     stop_server || true
@@ -173,17 +188,82 @@ start_phase_server() {
     local phase="$1"
     echo ""
     echo "--- starting server ($phase) ---"
+    # Everything the server logs from here on belongs to this phase.
+    LOG_OFFSET=$(wc -l < "$SERVER_LOG" 2>/dev/null || echo 0)
     start_server "$BINARY" "$PROJECT_DIR"
     SERVER_WORK_DIRS+=("$WORK_DIR")
     wait_for_ready 120
     local init_params='{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"reopen-test","version":"1.0"}}'
     rpc "initialize" "$init_params" > /dev/null
     send_notification "notifications/initialized"
+    wait_for_import_finished
 }
 
-# Answers of the last jdt_get_compilation_errors call, kept in a file: error_count_of() runs in
-# a command substitution, so a shell variable set inside it would not survive.
-LAST_ANSWER_FILE="$(mktemp)"
+# "ready for stdio" only means the transport is up; import and build run afterwards. Assertions on
+# the log would race with them, so wait for the line the import thread logs when it is done.
+wait_for_import_finished() {
+    local timeout=300
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if phase_log | grep -qF "Project import and build finished"; then
+            echo "Import and build finished after ${elapsed}s"
+            return 0
+        fi
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "ERROR: server died during import" >&2
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "ERROR: import did not finish within ${timeout}s" >&2
+    return 1
+}
+
+# ── Assertions ─────────────────────────────────────────────────────────────────
+
+phase_log() {
+    tail -n +$((LOG_OFFSET + 1)) "$SERVER_LOG" 2>/dev/null || true
+}
+
+assert_log() {
+    local pattern="$1"
+    if ! phase_log | grep -qF -- "$pattern"; then
+        echo "  ASSERTION FAILED: server log of this phase does not contain: $pattern"
+        PHASE_OK=false
+    fi
+}
+
+refute_log() {
+    local pattern="$1"
+    if phase_log | grep -qF -- "$pattern"; then
+        echo "  ASSERTION FAILED: server log of this phase unexpectedly contains: $pattern"
+        echo "    $(phase_log | grep -F -- "$pattern" | head -3)"
+        PHASE_OK=false
+    fi
+}
+
+assert_error_count() {
+    local expected="$1"
+    local actual
+    actual=$(error_count_of "$MODULE_NAME")
+    if [ "$actual" != "$expected" ]; then
+        echo "  ASSERTION FAILED: expected errorCount $expected for $MODULE_NAME, got '$actual'"
+        echo "    $(head -c 700 "$LAST_ANSWER_FILE" 2>/dev/null)"
+        PHASE_OK=false
+    fi
+}
+
+assert_error_count_at_least() {
+    local minimum="$1"
+    local actual
+    actual=$(error_count_of "$MODULE_NAME")
+    if [ -z "$actual" ] || [ "$actual" -lt "$minimum" ]; then
+        echo "  ASSERTION FAILED: expected at least $minimum errors for $MODULE_NAME, got '$actual'"
+        echo "    $(head -c 700 "$LAST_ANSWER_FILE" 2>/dev/null)"
+        PHASE_OK=false
+    fi
+}
 
 error_count_of() {
     local project="$1"
@@ -194,11 +274,47 @@ error_count_of() {
     echo "$text" | jq -r '.errorCount // empty' 2>/dev/null || true
 }
 
-dump_diagnostics() {
-    echo "  --- tool answer (truncated) ---"
-    echo "    $(head -c 800 "$LAST_ANSWER_FILE" 2>/dev/null)"
-    echo "  --- server log (import/build lines) ---"
-    grep -E "ProjectImporter|HeadlessApplication" "$SERVER_LOG" 2>/dev/null | tail -20 || true
+finish_phase() {
+    local name="$1"
+    stop_server
+    if $PHASE_OK; then
+        pass "$name"
+    else
+        fail "$name"
+        echo "  --- server log of the failed phase ---"
+        phase_log | grep -E "ProjectImporter|HeadlessApplication" | tail -20 || true
+    fi
+    PHASE_OK=true
+}
+
+# ── Fixture manipulation ───────────────────────────────────────────────────────
+
+# Replaces the resolved libraries with one entry pointing at a JAR that does not exist: what a
+# .classpath from an earlier import looks like once the POM has moved on in both directions.
+break_classpath() {
+    awk -v ghost="$GHOST_JAR" '
+        /kind="lib"/ { next }
+        /<\/classpath>/ { printf "    <classpathentry kind=\"lib\" path=\"%s\"/>\n", ghost }
+        { print }
+    ' "$CLASSPATH_FILE" > "$CLASSPATH_FILE.tmp"
+    mv "$CLASSPATH_FILE.tmp" "$CLASSPATH_FILE"
+    echo "  prepared stale .classpath:"
+    sed 's/^/    /' "$CLASSPATH_FILE"
+}
+
+# Changes the POM's content, the way adding a dependency would.
+change_pom() {
+    local marker="$1"
+    awk -v marker="$marker" '
+        /<\/project>/ { printf "    <!-- %s -->\n", marker }
+        { print }
+    ' "$MODULE_POM" > "$MODULE_POM.tmp"
+    mv "$MODULE_POM.tmp" "$MODULE_POM"
+}
+
+# Moves the POM's modification time without changing a byte, the way a checkout does.
+touch_pom() {
+    touch "$MODULE_POM"
 }
 
 # ── Phase A: first import into an empty workspace ──────────────────────────────
@@ -208,69 +324,39 @@ phase_a_first_import() {
     echo "=== Phase A: first import (fresh workspace) ==="
     start_phase_server "phase A"
 
-    local ok=true
-    local count
-    count=$(error_count_of "$MODULE_NAME")
-    if [ "$count" != "0" ]; then
-        echo "  ASSERTION FAILED: expected 0 errors on first import, got '$count'"
-        dump_diagnostics
-        ok=false
-    fi
+    assert_error_count 0
+    assert_log "Configured Maven project: $MODULE_NAME"
+    assert_log "$EXPECTED_COMPLIANCE"
+    assert_log "triggering incremental workspace build"
+    refute_log "Opened existing project"
     if [ ! -f "$CLASSPATH_FILE" ]; then
         echo "  ASSERTION FAILED: import did not write $CLASSPATH_FILE"
-        ok=false
+        PHASE_OK=false
     fi
 
-    stop_server
-
-    if $ok; then
-        pass "first import is clean and writes .classpath"
-    else
-        fail "first import is clean and writes .classpath"
-    fi
+    finish_phase "first import is clean, sets compliance and writes .classpath"
 }
 
 # ── Phase B: stale .classpath (issue #114, cause 1) ────────────────────────────
 
 phase_b_stale_classpath() {
     echo ""
-    echo "=== Phase B: reopen with stale .classpath (POM newer than .classpath) ==="
-
-    # Simulate a .classpath from an earlier import that the POM has moved on from, in both
-    # directions: the dependencies the module needs today are missing (here: everything the POM
-    # resolves, so the JUnit imports in src/test stop compiling), and a library it used to have is
-    # still listed although it is gone from the local repository. Backdating the file is what makes
-    # the POM look newer, which is the signal the importer keys on.
-    grep -v 'kind="lib"' "$CLASSPATH_FILE" > "$CLASSPATH_FILE.tmp"
-    mv "$CLASSPATH_FILE.tmp" "$CLASSPATH_FILE"
-    sed -i "s|</classpath>|\t<classpathentry kind=\"lib\" path=\"$GHOST_JAR\"/>\n</classpath>|" "$CLASSPATH_FILE"
-    touch -d '1 hour ago' "$CLASSPATH_FILE"
-    echo "  prepared stale .classpath:"
-    sed 's/^/    /' "$CLASSPATH_FILE"
+    echo "=== Phase B: reopen after the POM gained dependencies ==="
+    break_classpath
+    change_pom "phase B: dependency added"
 
     start_phase_server "phase B"
 
-    local ok=true
-    local count
-    count=$(error_count_of "$MODULE_NAME")
-    if [ "$count" != "0" ]; then
-        echo "  ASSERTION FAILED: expected 0 errors after reopen with stale .classpath, got '$count'"
-        dump_diagnostics
-        ok=false
-    fi
+    assert_log "Opened existing project: $MODULE_NAME — re-resolving classpath"
+    assert_log "triggering full workspace build"
+    assert_error_count 0
     if grep -q "$GHOST_JAR" "$CLASSPATH_FILE"; then
         echo "  ASSERTION FAILED: stale entry $GHOST_JAR still in $CLASSPATH_FILE"
         echo "    $(cat "$CLASSPATH_FILE")"
-        ok=false
+        PHASE_OK=false
     fi
 
-    stop_server
-
-    if $ok; then
-        pass "reopen re-resolves a stale .classpath (no false-positive build path errors)"
-    else
-        fail "reopen re-resolves a stale .classpath (no false-positive build path errors)"
-    fi
+    finish_phase "reopen re-resolves a stale .classpath (no false-positive build path errors)"
 }
 
 # ── Phase C: source broken while the server was down (cause 2, detection) ──────
@@ -288,22 +374,11 @@ JAVAEOF
 
     start_phase_server "phase C"
 
-    local ok=true
-    local count
-    count=$(error_count_of "$MODULE_NAME")
-    if [ -z "$count" ] || [ "$count" -lt 1 ]; then
-        echo "  ASSERTION FAILED: expected at least 1 error after reopen, got '$count'"
-        dump_diagnostics
-        ok=false
-    fi
+    assert_log "Opened existing project: $MODULE_NAME (classpath up to date)"
+    assert_log "triggering full workspace build"
+    assert_error_count_at_least 1
 
-    stop_server
-
-    if $ok; then
-        pass "reopen sees sources that changed while the server was down"
-    else
-        fail "reopen sees sources that changed while the server was down"
-    fi
+    finish_phase "reopen sees sources that changed while the server was down"
 }
 
 # ── Phase D: source repaired while the server was down (cause 2, stale markers) ─
@@ -316,34 +391,70 @@ phase_d_error_fixed_while_down() {
 
     start_phase_server "phase D"
 
-    local ok=true
-    local count
-    count=$(error_count_of "$MODULE_NAME")
-    if [ "$count" != "0" ]; then
-        echo "  ASSERTION FAILED: expected 0 errors after reopen (markers of the previous run must not survive), got '$count'"
-        dump_diagnostics
-        ok=false
-    fi
+    assert_log "Opened existing project: $MODULE_NAME (classpath up to date)"
+    assert_log "triggering full workspace build"
+    assert_error_count 0
 
-    stop_server
+    finish_phase "reopen drops markers of problems that were fixed while the server was down"
+}
 
-    if $ok; then
-        pass "reopen drops markers of problems that were fixed while the server was down"
-    else
-        fail "reopen drops markers of problems that were fixed while the server was down"
-    fi
+# ── Phase E: POM touched without a content change ──────────────────────────────
+# The regression guard for anchoring freshness to the .classpath's own timestamp: JDT does not
+# rewrite that file when the resolved classpath is unchanged, so such an anchor would never
+# advance and every start would re-resolve again.
+
+phase_e_pom_touched() {
+    echo ""
+    echo "=== Phase E: POM touched, content unchanged (first start re-resolves once) ==="
+    touch_pom
+
+    start_phase_server "phase E, first start"
+    assert_log "Opened existing project: $MODULE_NAME — re-resolving classpath"
+    assert_error_count 0
+    finish_phase "a touched POM re-resolves once"
+
+    echo ""
+    echo "=== Phase E: second start after the same touch (must not re-resolve again) ==="
+    start_phase_server "phase E, second start"
+    assert_log "Opened existing project: $MODULE_NAME (classpath up to date)"
+    assert_log "$EXPECTED_COMPLIANCE"
+    refute_log "re-resolving classpath"
+    assert_error_count 0
+    finish_phase "the re-resolution settles instead of repeating on every start"
+}
+
+# ── Phase F: POM changed for real ──────────────────────────────────────────────
+
+phase_f_pom_changed() {
+    echo ""
+    echo "=== Phase F: POM changed for real (re-resolves exactly once) ==="
+    change_pom "phase F: another change"
+
+    start_phase_server "phase F, first start"
+    assert_log "Opened existing project: $MODULE_NAME — re-resolving classpath"
+    assert_log "triggering full workspace build"
+    assert_error_count 0
+    finish_phase "a changed POM re-resolves"
+
+    echo ""
+    echo "=== Phase F: second start after the same change (must not re-resolve again) ==="
+    start_phase_server "phase F, second start"
+    assert_log "Opened existing project: $MODULE_NAME (classpath up to date)"
+    refute_log "re-resolving classpath"
+    assert_error_count 0
+    finish_phase "a changed POM re-resolves exactly once"
 }
 
 phase_a_first_import
 phase_b_stale_classpath
 phase_c_new_error_while_down
 phase_d_error_fixed_while_down
+phase_e_pom_touched
+phase_f_pom_changed
 
 print_summary
 
 if [ "$TESTS_FAILED" -gt 0 ]; then
-    echo "Server log (last 40 import/build lines):"
-    grep -E "ProjectImporter|HeadlessApplication" "$SERVER_LOG" 2>/dev/null | tail -40 || true
     exit 1
 fi
 
