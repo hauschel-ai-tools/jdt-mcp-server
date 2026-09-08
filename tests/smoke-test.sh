@@ -204,10 +204,29 @@ test_notification_ignored() {
     fi
 }
 
-# ── Test 9: list_projects tool call ────────────────────────────────────────────
+# ── Test 9: missing required argument rejected before the handler (#57) ───────
+
+test_missing_required_argument() {
+    echo "[Test 9] tools/call with wrongly named argument"
+    # jdt_find_type requires 'pattern'; an AI client that guesses 'typeName' must get a
+    # self-healing tool error, not an NPE -- and must not wait for the workspace build.
+    local params='{"name":"jdt_find_type","arguments":{"typeName":"Foo"}}'
+    local response
+    response=$(send_and_receive "tools/call" "$params") || { fail "missing required argument (no response)"; return; }
+
+    local ok=true
+    assert_json_field "$response" ".result.isError" "true" "isError true" || ok=false
+    assert_json_contains "$response" ".result.content[0].text" "Missing required parameter for jdt_find_type: pattern" "names missing parameter" || ok=false
+    assert_json_contains "$response" ".result.content[0].text" "unknown parameter typeName" "names unknown parameter" || ok=false
+    assert_json_contains "$response" ".result.content[0].text" '"example"' "contains example call" || ok=false
+
+    if $ok; then pass "missing required argument"; else fail "missing required argument"; fi
+}
+
+# ── Test 10: list_projects tool call ───────────────────────────────────────────
 
 test_list_projects() {
-    echo "[Test 9] tools/call jdt_list_projects (non-fatal)"
+    echo "[Test 10] tools/call jdt_list_projects (non-fatal)"
     local params='{"name":"jdt_list_projects","arguments":{}}'
     local response
     response=$(send_and_receive "tools/call" "$params") || { skip "jdt_list_projects (no response)"; return; }
@@ -239,6 +258,7 @@ test_unknown_method
 test_invalid_jsonrpc
 test_unknown_tool
 test_notification_ignored
+test_missing_required_argument
 test_list_projects
 
 # ── Summary ────────────────────────────────────────────────────────────────────

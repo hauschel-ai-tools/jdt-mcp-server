@@ -98,11 +98,11 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> extractMethod(
-                (String) args.get("filePath"),
-                ((Number) args.get("startOffset")).intValue(),
-                ((Number) args.get("endOffset")).intValue(),
-                (String) args.get("methodName"),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "filePath"),
+                ArgParser.requiredInt(args, "startOffset"),
+                ArgParser.requiredInt(args, "endOffset"),
+                ArgParser.string(args, "methodName"),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     private static CallToolResult extractMethod(String filePath, int startOffset, int endOffset,
@@ -220,11 +220,11 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> moveType(
-                (String) args.get("typeName"),
-                (String) args.get("targetPackage"),
-                (String) args.get("targetProject"),
-                args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false,
+                ArgParser.string(args, "typeName"),
+                ArgParser.string(args, "targetPackage"),
+                ArgParser.string(args, "targetProject"),
+                ArgParser.boolOrDefault(args, "updateReferences", true),
+                ArgParser.boolOrDefault(args, "preview", false),
                 progress));
     }
 
@@ -424,9 +424,9 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> inlineElement(
-                (String) args.get("filePath"),
-                ((Number) args.get("offset")).intValue(),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "filePath"),
+                ArgParser.requiredInt(args, "offset"),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     private static CallToolResult inlineElement(String filePath, int offset, boolean previewOnly) {
@@ -595,13 +595,13 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> changeMethodSignature(
-                (String) args.get("className"),
-                (String) args.get("methodName"),
-                (String) args.get("newName"),
-                (String) args.get("newReturnType"),
-                (List<Map<String, String>>) args.get("addParameters"),
-                (List<String>) args.get("removeParameters"),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "methodName"),
+                ArgParser.string(args, "newName"),
+                ArgParser.string(args, "newReturnType"),
+                ArgParser.<Map<String, String>>list(args, "addParameters", null),
+                ArgParser.<String>list(args, "removeParameters", null),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     private static CallToolResult changeMethodSignature(String className, String methodName,
@@ -755,12 +755,12 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> encapsulateField(
-                (String) args.get("className"),
-                (String) args.get("fieldName"),
-                args.get("generateGetter") != null ? (Boolean) args.get("generateGetter") : true,
-                args.get("generateSetter") != null ? (Boolean) args.get("generateSetter") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false,
-                args.get("ignoreCompileErrors") != null ? (Boolean) args.get("ignoreCompileErrors") : false));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldName"),
+                ArgParser.boolOrDefault(args, "generateGetter", true),
+                ArgParser.boolOrDefault(args, "generateSetter", true),
+                ArgParser.boolOrDefault(args, "preview", false),
+                ArgParser.boolOrDefault(args, "ignoreCompileErrors", false)));
     }
 
     private static CallToolResult encapsulateField(String className, String fieldName,
@@ -905,11 +905,11 @@ public class RefactoringTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> introduceParameter(
-                (String) args.get("filePath"),
-                ((Number) args.get("offset")).intValue(),
-                args.get("length") != null ? ((Number) args.get("length")).intValue() : 0,
-                (String) args.get("parameterName"),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "filePath"),
+                ArgParser.requiredInt(args, "offset"),
+                ArgParser.intOrDefault(args, "length", 0),
+                ArgParser.string(args, "parameterName"),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     private static CallToolResult introduceParameter(String filePath, int offset, int length,

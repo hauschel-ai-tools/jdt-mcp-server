@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import org.naturzukunft.jdt.mcp.HeadlessApplication;
@@ -20,6 +21,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
 /**
  * Handles MCP protocol messages (JSON-RPC 2.0).
@@ -203,6 +205,30 @@ public class McpProtocolHandler {
             throw new McpException(-32602, "Unknown tool: " + toolName);
         }
 
+        // Convert arguments to Map
+        Map<String, Object> args = new HashMap<>();
+        if (arguments != null && arguments.isObject()) {
+            try {
+                args = mapper.convertValue(arguments, Map.class);
+            } catch (Exception e) {
+                throw new McpException(-32602, "Invalid arguments: " + e.getMessage());
+            }
+        }
+
+        // Reject calls that miss a required parameter before the handler (and before the
+        // readiness gate: a malformed call must not wait for a workspace build). The
+        // report names accepted/unknown parameter names so an AI client can correct the
+        // call instead of guessing from an NPE (#57).
+        JsonSchema schema = registration.tool().inputSchema();
+        Optional<Map<String, Object>> violation = ToolArgumentValidator.validate(toolName,
+                schema != null ? schema.required() : null,
+                schema != null ? schema.properties() : null,
+                args);
+        if (violation.isPresent()) {
+            McpLogger.warn("Protocol", "Tool " + toolName + " rejected: " + violation.get().get("message"));
+            return errorResult(toJson(violation.get()));
+        }
+
         // Wait for project import and build to complete (#28)
         // Allow metadata tools to run immediately during import
         if (!isImportSafeTool(toolName) && HeadlessApplication.isImporting()) {
@@ -217,16 +243,6 @@ public class McpProtocolHandler {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new McpException(-32603, "Interrupted while waiting for project import/build");
-            }
-        }
-
-        // Convert arguments to Map
-        Map<String, Object> args = new HashMap<>();
-        if (arguments != null && arguments.isObject()) {
-            try {
-                args = mapper.convertValue(arguments, Map.class);
-            } catch (Exception e) {
-                throw new McpException(-32602, "Invalid arguments: " + e.getMessage());
             }
         }
 
@@ -295,16 +311,30 @@ public class McpProtocolHandler {
             // NoClassDefFoundError for jdt.ui classes). An Error escaping here would
             // kill the stdio reader thread and with it the whole server session.
             McpLogger.error("Protocol", "Tool " + toolName + " threw " + t.getClass().getSimpleName(), t);
+            return errorResult("Error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
 
-            Map<String, Object> result = new HashMap<>();
-            List<Map<String, Object>> content = new ArrayList<>();
-            Map<String, Object> textContent = new HashMap<>();
-            textContent.put("type", "text");
-            textContent.put("text", "Error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-            content.add(textContent);
-            result.put("content", content);
-            result.put("isError", true);
-            return result;
+    /**
+     * Builds a tools/call result with a single text content item and {@code isError=true}.
+     */
+    private static Map<String, Object> errorResult(String text) {
+        Map<String, Object> result = new HashMap<>();
+        List<Map<String, Object>> content = new ArrayList<>();
+        Map<String, Object> textContent = new HashMap<>();
+        textContent.put("type", "text");
+        textContent.put("text", text);
+        content.add(textContent);
+        result.put("content", content);
+        result.put("isError", true);
+        return result;
+    }
+
+    private String toJson(Map<String, Object> value) {
+        try {
+            return mapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value.get("message"));
         }
     }
 

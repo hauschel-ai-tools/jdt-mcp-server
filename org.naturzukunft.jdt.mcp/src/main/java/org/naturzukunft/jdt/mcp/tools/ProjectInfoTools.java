@@ -234,7 +234,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> getClasspath((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getClasspath(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult getClasspath(String projectName) {
@@ -308,7 +308,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> getCompilationErrors((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getCompilationErrors(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult getCompilationErrors(String projectName) {
@@ -377,7 +377,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> getProjectStructure((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> getProjectStructure(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult getProjectStructure(String projectName) {
@@ -445,7 +445,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> refreshProject((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> refreshProject(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult refreshProject(String projectName) {
@@ -506,7 +506,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> mavenUpdateProject((String) args.get("projectName")));
+        return new ToolRegistration(tool, (args, progress) -> mavenUpdateProject(ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult mavenUpdateProject(String projectName) {
@@ -588,7 +588,7 @@ public class ProjectInfoTools {
                 schema,
                 null);
 
-        return new ToolRegistration(tool, (args, progress) -> importProject((String) args.get("path")));
+        return new ToolRegistration(tool, (args, progress) -> importProject(ArgParser.string(args, "path")));
     }
 
     private static CallToolResult importProject(String path) {
@@ -653,8 +653,8 @@ public class ProjectInfoTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> removeProject(
-                (String) args.get("projectName"),
-                Boolean.TRUE.equals(args.get("deleteContents"))));
+                ArgParser.string(args, "projectName"),
+                ArgParser.boolOrDefault(args, "deleteContents", false)));
     }
 
     private static CallToolResult removeProject(String projectName, boolean deleteContents) {

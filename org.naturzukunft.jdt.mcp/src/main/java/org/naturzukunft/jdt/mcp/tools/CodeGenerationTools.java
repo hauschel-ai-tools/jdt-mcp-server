@@ -93,16 +93,16 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> addMethod(
-                (String) args.get("className"),
-                (String) args.get("methodName"),
-                (String) args.get("returnType"),
-                (String) args.get("visibility"),
-                (String) args.get("parameters"),
-                (String) args.get("body"),
-                (String) args.get("annotations"),
-                args.get("isStatic") != null ? (Boolean) args.get("isStatic") : false,
-                args.get("isFinal") != null ? (Boolean) args.get("isFinal") : false,
-                (String) args.get("throwsClause")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "methodName"),
+                ArgParser.string(args, "returnType"),
+                ArgParser.string(args, "visibility"),
+                ArgParser.string(args, "parameters"),
+                ArgParser.string(args, "body"),
+                ArgParser.string(args, "annotations"),
+                ArgParser.boolOrDefault(args, "isStatic", false),
+                ArgParser.boolOrDefault(args, "isFinal", false),
+                ArgParser.string(args, "throwsClause")));
     }
 
     private static CallToolResult addMethod(String className, String methodName, String returnType,
@@ -280,14 +280,14 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> addField(
-                (String) args.get("className"),
-                (String) args.get("fieldName"),
-                (String) args.get("fieldType"),
-                (String) args.get("visibility"),
-                (String) args.get("annotations"),
-                args.get("isStatic") != null ? (Boolean) args.get("isStatic") : false,
-                args.get("isFinal") != null ? (Boolean) args.get("isFinal") : false,
-                (String) args.get("initialValue")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldName"),
+                ArgParser.string(args, "fieldType"),
+                ArgParser.string(args, "visibility"),
+                ArgParser.string(args, "annotations"),
+                ArgParser.boolOrDefault(args, "isStatic", false),
+                ArgParser.boolOrDefault(args, "isFinal", false),
+                ArgParser.string(args, "initialValue")));
     }
 
     private static CallToolResult addField(String className, String fieldName, String fieldType,
@@ -460,8 +460,8 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> addImport(
-                (String) args.get("className"),
-                (String) args.get("imports")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "imports")));
     }
 
     private static CallToolResult addImport(String className, String imports) {
@@ -570,9 +570,9 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> implementInterface(
-                (String) args.get("className"),
-                (String) args.get("interfaceName"),
-                args.get("generateMethodStubs") != null ? (Boolean) args.get("generateMethodStubs") : true));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "interfaceName"),
+                ArgParser.boolOrDefault(args, "generateMethodStubs", true)));
     }
 
     private static CallToolResult implementInterface(String className, String interfaceName, boolean generateMethodStubs) {
@@ -918,10 +918,10 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateGettersSetters(
-                (String) args.get("className"),
-                (String) args.get("fieldNames"),
-                args.get("generateGetters") != null ? (Boolean) args.get("generateGetters") : true,
-                args.get("generateSetters") != null ? (Boolean) args.get("generateSetters") : true));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldNames"),
+                ArgParser.boolOrDefault(args, "generateGetters", true),
+                ArgParser.boolOrDefault(args, "generateSetters", true)));
     }
 
     private static CallToolResult generateGettersSetters(String className, String fieldNames,
@@ -1042,9 +1042,9 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateConstructor(
-                (String) args.get("className"),
-                (String) args.get("fieldNames"),
-                args.get("generateNoArgs") != null ? (Boolean) args.get("generateNoArgs") : false));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldNames"),
+                ArgParser.boolOrDefault(args, "generateNoArgs", false)));
     }
 
     private static CallToolResult generateConstructor(String className, String fieldNames, boolean generateNoArgs) {
@@ -1163,8 +1163,8 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateEqualsHashCode(
-                (String) args.get("className"),
-                (String) args.get("fieldNames")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldNames")));
     }
 
     private static CallToolResult generateEqualsHashCode(String className, String fieldNames) {
@@ -1287,8 +1287,8 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateToString(
-                (String) args.get("className"),
-                (String) args.get("fieldNames")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldNames")));
     }
 
     private static CallToolResult generateToString(String className, String fieldNames) {
@@ -1394,9 +1394,9 @@ public class CodeGenerationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateDelegateMethods(
-                (String) args.get("className"),
-                (String) args.get("fieldName"),
-                (String) args.get("methodNames")));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "fieldName"),
+                ArgParser.string(args, "methodNames")));
     }
 
     private static CallToolResult generateDelegateMethods(String className, String fieldName, String methodNames) {

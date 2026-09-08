@@ -10,7 +10,7 @@
 # unit-tests/java with plain javac against JUnit 5 jars already cached locally (Eclipse itself
 # ships a JUnit 5 test runner, so these are on disk from any prior Tycho build against the
 # 2025-12 p2 repository), then run them with a tiny JUnit-Platform-Launcher-based runner
-# (UnitTestRunner). See issue #82.
+# (UnitTestRunner). See issues #82, #57.
 #
 # Usage: tests/run-unit-tests.sh
 
@@ -47,10 +47,15 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 echo "Compiling unit tests..."
-javac -encoding UTF-8 -d "$WORK_DIR" -cp "$CP" \
-    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenCompilerCompliance.java" \
-    "$MODULE/unit-tests/java/org/naturzukunft/jdt/mcp/MavenCompilerComplianceTest.java" \
-    "$MODULE/unit-tests/java/org/naturzukunft/jdt/mcp/UnitTestRunner.java"
+# Production classes under test: only those without an Eclipse/OSGi/Jackson/MCP-SDK import.
+MAIN_SOURCES=(
+    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/MavenCompilerCompliance.java"
+    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/tools/ArgParser.java"
+    "$MODULE/src/main/java/org/naturzukunft/jdt/mcp/server/ToolArgumentValidator.java"
+)
+mapfile -t TEST_SOURCES < <(find "$MODULE/unit-tests/java" -name '*.java' | sort)
+
+javac -encoding UTF-8 -d "$WORK_DIR" -cp "$CP" "${MAIN_SOURCES[@]}" "${TEST_SOURCES[@]}"
 
 echo "Running unit tests..."
 java -cp "$WORK_DIR:$CP" org.naturzukunft.jdt.mcp.UnitTestRunner

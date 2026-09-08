@@ -64,10 +64,10 @@ class ExtractInterfaceRefactoring {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> extractInterface(
-                (String) args.get("className"),
-                (String) args.get("interfaceName"),
-                args.get("methodNames") != null ? (List<String>) args.get("methodNames") : List.of("*"),
-                args.get("preview") != null ? (Boolean) args.get("preview") : false));
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "interfaceName"),
+                ArgParser.list(args, "methodNames", List.of("*")),
+                ArgParser.boolOrDefault(args, "preview", false)));
     }
 
     private static CallToolResult extractInterface(String className, String interfaceName,

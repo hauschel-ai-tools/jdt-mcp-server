@@ -119,14 +119,14 @@ class RenameRefactoring {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> renameElement(
-                (String) args.get("elementName"),
-                (String) args.get("newName"),
-                (String) args.get("elementType"),
-                args.get("updateReferences") != null ? (Boolean) args.get("updateReferences") : true,
-                args.get("renameSubpackages") != null ? (Boolean) args.get("renameSubpackages") : true,
-                args.get("preview") != null ? (Boolean) args.get("preview") : false,
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "newName"),
+                ArgParser.string(args, "elementType"),
+                ArgParser.boolOrDefault(args, "updateReferences", true),
+                ArgParser.boolOrDefault(args, "renameSubpackages", true),
+                ArgParser.boolOrDefault(args, "preview", false),
                 0,
-                args.get("ignoreCompileErrors") != null ? (Boolean) args.get("ignoreCompileErrors") : false));
+                ArgParser.boolOrDefault(args, "ignoreCompileErrors", false)));
     }
 
     /**

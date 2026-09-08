@@ -68,8 +68,8 @@ public class DocumentationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> getJavadoc(
-                (String) args.get("elementName"),
-                (String) args.get("elementType")));
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "elementType")));
     }
 
     private static CallToolResult getJavadoc(String elementName, String elementType) {
@@ -144,8 +144,8 @@ public class DocumentationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> getAnnotations(
-                (String) args.get("elementName"),
-                (String) args.get("elementType")));
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "elementType")));
     }
 
     private static CallToolResult getAnnotations(String elementName, String elementType) {
@@ -230,8 +230,8 @@ public class DocumentationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> findAnnotatedElements(
-                (String) args.get("annotationName"),
-                (String) args.get("projectName")));
+                ArgParser.string(args, "annotationName"),
+                ArgParser.string(args, "projectName")));
     }
 
     private static CallToolResult findAnnotatedElements(String annotationName, String projectName) {
@@ -353,9 +353,9 @@ public class DocumentationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> generateJavadoc(
-                (String) args.get("elementName"),
-                (String) args.get("elementType"),
-                Boolean.TRUE.equals(args.get("force"))));
+                ArgParser.string(args, "elementName"),
+                ArgParser.string(args, "elementType"),
+                ArgParser.boolOrDefault(args, "force", false)));
     }
 
     private static CallToolResult generateJavadoc(String elementName, String elementType, boolean force) {

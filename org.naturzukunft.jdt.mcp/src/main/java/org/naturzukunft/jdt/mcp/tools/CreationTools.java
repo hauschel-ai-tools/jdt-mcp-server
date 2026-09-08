@@ -69,13 +69,13 @@ public class CreationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> createClass(
-                (String) args.get("projectName"),
-                (String) args.get("packageName"),
-                (String) args.get("className"),
-                (String) args.get("superclass"),
-                (String) args.get("interfaces"),
-                args.get("isAbstract") != null ? (Boolean) args.get("isAbstract") : false,
-                (String) args.get("sourceFolder")));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "packageName"),
+                ArgParser.string(args, "className"),
+                ArgParser.string(args, "superclass"),
+                ArgParser.string(args, "interfaces"),
+                ArgParser.boolOrDefault(args, "isAbstract", false),
+                ArgParser.string(args, "sourceFolder")));
     }
 
     private static CallToolResult createClass(String projectName, String packageName, String className,
@@ -176,11 +176,11 @@ public class CreationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> createInterface(
-                (String) args.get("projectName"),
-                (String) args.get("packageName"),
-                (String) args.get("interfaceName"),
-                (String) args.get("superInterfaces"),
-                (String) args.get("sourceFolder")));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "packageName"),
+                ArgParser.string(args, "interfaceName"),
+                ArgParser.string(args, "superInterfaces"),
+                ArgParser.string(args, "sourceFolder")));
     }
 
     private static CallToolResult createInterface(String projectName, String packageName, String interfaceName,
@@ -275,12 +275,12 @@ public class CreationTools {
                 null);
 
         return new ToolRegistration(tool, (args, progress) -> createEnum(
-                (String) args.get("projectName"),
-                (String) args.get("packageName"),
-                (String) args.get("enumName"),
-                (String) args.get("values"),
-                (String) args.get("interfaces"),
-                (String) args.get("sourceFolder")));
+                ArgParser.string(args, "projectName"),
+                ArgParser.string(args, "packageName"),
+                ArgParser.string(args, "enumName"),
+                ArgParser.string(args, "values"),
+                ArgParser.string(args, "interfaces"),
+                ArgParser.string(args, "sourceFolder")));
     }
 
     private static CallToolResult createEnum(String projectName, String packageName, String enumName,
