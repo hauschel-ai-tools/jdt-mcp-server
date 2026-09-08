@@ -147,13 +147,19 @@ Alternative zu `install.sh`: dieses Repo ist selbst ein Claude-Code-Plugin
 das Plugin die MCP-Server-Registrierung selbst mit — es ist kein separates
 `install.sh` nötig, um `jdt-mcp` als Server bekannt zu machen.
 
-Der Server braucht trotzdem den Launcher-Binary. Dafür läuft beim Session-Start ein
-`SessionStart`-Hook (`hooks/ensure-server.sh`): fehlt der Launcher (`~/.local/bin/jdt-mcp`
-bzw. `~/.local/share/jdt-mcp/bin/jdt-mcp`), führt er `install.sh` aus dem Plugin-Verzeichnis
-aus — mit `JDTMCP_SKIP_CLAUDE=1`, installiert also **nur** den Launcher, ohne zusätzlich
-`claude mcp add` aufzurufen (das übernimmt bereits die `.mcp.json` des Plugins). Fehlt Java 21+
-oder Netzzugriff, meldet der Hook das als Kontext-Hinweis in der Session, statt die Session
-zu blockieren (Exit 0 in jedem Fall).
+Der Server braucht trotzdem den Launcher-Binary. Die Plugin-`.mcp.json` startet ihn über
+einen absoluten, `${HOME}`-expandierten Pfad (`${HOME}/.local/share/jdt-mcp/bin/jdt-mcp`) statt
+über den bloßen Befehlsnamen `jdt-mcp` — der Prozess, der MCP-Server startet, hat nicht
+zwangsläufig `~/.local/bin` im PATH (viele `.profile`-Setups erweitern PATH nur für Login-Shells).
+Dafür läuft beim Session-Start ein `SessionStart`-Hook (`hooks/ensure-server.sh`): fehlt der
+Launcher (`~/.local/bin/jdt-mcp` bzw. `~/.local/share/jdt-mcp/bin/jdt-mcp`), führt er `install.sh`
+aus dem Plugin-Verzeichnis aus — mit `JDTMCP_SKIP_CLAUDE=1`, installiert also **nur** den
+Launcher, ohne zusätzlich `claude mcp add` aufzurufen (das übernimmt bereits die `.mcp.json` des
+Plugins). Fehlt Java 21+ oder Netzzugriff, meldet der Hook das als Kontext-Hinweis in der Session,
+statt die Session zu blockieren (Exit 0 in jedem Fall, mit Timeout um den `install.sh`-Aufruf).
+`install.sh` selbst serialisiert parallele Läufe (z.B. zwei gleichzeitig gestartete Sessions ohne
+Launcher) über einen `mkdir`-Lock mit Erkennung verwaister Locks — eine zweite Session wartet kurz
+und überspringt Download/Entpacken dann, statt zwei Installationen gegeneinander laufen zu lassen.
 
 **Schon eine Standalone-Installation per `install.sh` vorhanden** (also `jdt-mcp` bereits via
 `claude mcp add -s user jdt-mcp ...` im User-Scope registriert)? Dann NICHT zusätzlich das

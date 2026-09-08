@@ -15,6 +15,9 @@
 #                                     .mcp.json den Server registriert (siehe hooks/ensure-server.sh)
 #     JDTMCP_DRY_RUN=1                Kein Download, keine echte Installation -- legt nur einen
 #                                     Stub-Launcher an. Für Hook-/CI-Tests ohne Netzzugriff.
+#     JDTMCP_LOCK_WAIT_MAX=30         Sekunden, die auf eine parallel laufende Installation
+#                                     gewartet wird, bevor Download/Entpacken übersprungen wird.
+#     JDTMCP_LOCK_STALE_AFTER=300     Alter in Sekunden, ab dem ein Lock als verwaist gilt.
 #
 
 set -euo pipefail
@@ -27,6 +30,19 @@ INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdt-mcp}"
 BIN_DIR="$HOME/.local/bin"
 SKIP_CLAUDE="${JDTMCP_SKIP_CLAUDE:-0}"
 DRY_RUN="${JDTMCP_DRY_RUN:-0}"
+# curl-Timeouts: ein hängender DNS-/Netzwerkzugriff darf das Skript (und damit
+# den SessionStart-Hook, der es aufruft) nicht unbegrenzt blockieren.
+CURL_CONNECT_TIMEOUT=10
+CURL_MAX_TIME_API=30
+CURL_MAX_TIME_DOWNLOAD=300
+
+# Lock gegen parallele install.sh-Läufe (z.B. zwei gleichzeitig gestartete
+# Claude-Code-Sessions, deren SessionStart-Hook beide den Launcher vermissen):
+# mkdir ist auf Linux und macOS atomar, kein flock/util-linux nötig.
+LOCK_DIR="${INSTALL_DIR}.lock"
+LOCK_HELD=0
+LOCK_WAIT_MAX="${JDTMCP_LOCK_WAIT_MAX:-30}"
+LOCK_STALE_AFTER="${JDTMCP_LOCK_STALE_AFTER:-300}"
 
 # Alt-Installation vor der Umbenennung (Issue #107): Launcher hieß bis v1.1.0 "jdtls-mcp"
 LEGACY_INSTALL_DIR="$HOME/.local/share/jdtls-mcp"
@@ -47,6 +63,57 @@ fi
 info()  { echo -e "${GREEN}>>>${NC} $*"; }
 warn()  { echo -e "${YELLOW}>>>${NC} $*"; }
 error() { echo -e "${RED}>>>${NC} $*" >&2; exit 1; }
+
+# --- Lock gegen parallele Läufe (mkdir ist atomar, portabel Linux/macOS) ---
+lock_age_seconds() {
+    local mtime
+    mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo "")
+    [ -n "$mtime" ] || { echo 0; return; }
+    echo $(( $(date +%s) - mtime ))
+}
+
+# Gibt 0 zurück, wenn der Lock gehalten wird (Aufrufer darf installieren).
+# Gibt 1 zurück, wenn eine andere Installation läuft und das Warten
+# ausgeschöpft ist (Aufrufer überspringt Download/Entpacken, macht sonst weiter).
+acquire_lock() {
+    local waited=0
+    # Elternverzeichnis muss existieren, damit "mkdir $LOCK_DIR" (ohne -p, das
+    # bewahrt die Atomarität des eigentlichen Locks) nicht schon daran scheitert.
+    mkdir -p "$(dirname "$LOCK_DIR")"
+    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+        local age; age=$(lock_age_seconds)
+        if [ "$age" -gt "$LOCK_STALE_AFTER" ]; then
+            warn "Verwaister Installations-Lock (${age}s alt) wird entfernt: $LOCK_DIR"
+            rmdir "$LOCK_DIR" 2>/dev/null || true
+            continue
+        fi
+        if [ "$waited" -ge "$LOCK_WAIT_MAX" ]; then
+            warn "Installation läuft bereits in einer anderen Session ($LOCK_DIR) - Download/Entpacken wird übersprungen."
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    LOCK_HELD=1
+    return 0
+}
+
+release_lock() {
+    if [ "$LOCK_HELD" = "1" ]; then
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        LOCK_HELD=0
+    fi
+}
+
+# Ein einziger EXIT-Trap für das ganze Skript (statt mehrerer, die sich
+# gegenseitig überschreiben würden): räumt Downloadverzeichnis und Lock auf,
+# gleich welcher Codepfad terminiert.
+TMP_DIR=""
+cleanup_on_exit() {
+    [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
+    release_lock
+}
+trap cleanup_on_exit EXIT
 
 # --- OS und Architektur erkennen ---
 detect_platform() {
@@ -112,7 +179,7 @@ resolve_version() {
     info "Ermittle neueste Version..."
     local api_url="${API_PREFIX}/${REPO}/releases/latest"
     local response
-    response=$(curl -sSf "$api_url" 2>/dev/null) || error "Konnte Releases nicht abrufen. Ist $BASE_URL erreichbar?"
+    response=$(curl -sSf --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME_API" "$api_url" 2>/dev/null) || error "Konnte Releases nicht abrufen. Ist $BASE_URL erreichbar?"
 
     VERSION=$(echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
     if [ -z "$VERSION" ]; then
@@ -161,10 +228,10 @@ EOF
     info "Download: $download_url"
 
     TMP_DIR=$(mktemp -d)
-    trap 'rm -rf "$TMP_DIR"' EXIT
 
     local archive="$TMP_DIR/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
-    curl -sSfL -o "$archive" "$download_url" || error "Download fehlgeschlagen. Existiert Version v${VERSION}?"
+    curl -sSfL --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME_DOWNLOAD" \
+        -o "$archive" "$download_url" || error "Download fehlgeschlagen. Existiert Version v${VERSION}?"
 
     # Vorherige Installation prüfen
     if [ -d "$INSTALL_DIR" ]; then
@@ -271,8 +338,16 @@ main() {
     detect_platform
     check_java
     resolve_version
-    cleanup_legacy
-    install
+
+    # Download/Entpacken nur unter dem Lock -- läuft anderswo schon eine
+    # Installation, wird sie hier übersprungen (Binary kommt gleich von dort),
+    # Java-Check/Konfiguration laufen trotzdem durch.
+    if acquire_lock; then
+        cleanup_legacy
+        install
+        release_lock
+    fi
+
     configure_claude
     print_summary
 }

@@ -53,6 +53,10 @@ jobs:
         run: tests/lifecycle-test.sh
         timeout-minutes: 10
 
+      - name: Run hook / install.sh regression tests
+        run: tests/hook-test.sh
+        timeout-minutes: 5
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "jdt-mcp": {
-      "command": "jdt-mcp",
+      "command": "${HOME}/.local/share/jdt-mcp/bin/jdt-mcp",
       "args": []
     }
   }
