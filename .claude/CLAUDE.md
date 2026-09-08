@@ -47,7 +47,7 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 
 ## Git
 
-- Repository: https://git.changinggraph.org/ai-tools/jdt-mcp-server
+- Repository: https://github.com/hauschel-ai-tools/jdt-mcp-server
 
 ## Projektstruktur
 

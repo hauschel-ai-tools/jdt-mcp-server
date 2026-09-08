@@ -24,7 +24,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
  *
  * All errors are logged via {@link McpLogger}.
  *
- * @see <a href="https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/32">#32</a>
+ * @see <a href="https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/32">#32</a>
  */
 class ToolErrors {
 

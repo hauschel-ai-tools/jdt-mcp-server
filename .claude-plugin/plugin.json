@@ -4,6 +4,6 @@
   "author": {
     "name": "SoftwareEngineering Hauschel"
   },
-  "repository": "https://git.changinggraph.org/ai-tools/jdt-mcp-server",
-  "license": "EUPL-1.2"
+  "repository": "https://github.com/hauschel-ai-tools/jdt-mcp-server",
+  "license": "Apache-2.0"
 }

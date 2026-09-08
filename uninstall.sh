@@ -3,7 +3,7 @@
 # JDT MCP Server - Uninstaller
 #
 # Usage:
-#   curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh | bash
+#   curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/uninstall.sh | bash
 #
 #   Optionen via Umgebungsvariablen:
 #     JDTMCP_INSTALL_DIR=~/my/dir  Installationsverzeichnis (falls angepasst)
