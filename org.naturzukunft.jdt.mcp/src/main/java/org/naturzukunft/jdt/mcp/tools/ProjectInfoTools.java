@@ -12,9 +12,11 @@ import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IJavaModelMarker;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
@@ -304,6 +306,9 @@ public class ProjectInfoTools {
                 "jdt_get_compilation_errors",
                 "Get all compilation errors and warnings for a Java project. " +
                 "Returns file location, line number, and error message. " +
+                "Includes build path problems (missing required library, duplicate entry, classpath cycle), " +
+                "marked with kind=BUILDPATH and listed first; they are counted in errorCount because they " +
+                "block the build. Everything else has kind=JAVA. " +
                 "TIP: Call jdt_refresh_project first if you modified files externally, otherwise you may see stale errors.",
                 schema,
                 null);
@@ -318,36 +323,23 @@ public class ProjectInfoTools {
                 return new CallToolResult("Project not found: " + projectName, true);
             }
 
-            IMarker[] markers = project.findMarkers(
-                    "org.eclipse.jdt.core.problem",
-                    true,
-                    IResource.DEPTH_INFINITE);
-
             List<Map<String, Object>> errors = new ArrayList<>();
             List<Map<String, Object>> warnings = new ArrayList<>();
 
-            for (IMarker marker : markers) {
-                Map<String, Object> problem = new HashMap<>();
-                problem.put("message", marker.getAttribute(IMarker.MESSAGE, ""));
-                problem.put("file", marker.getResource().getLocation().toString());
-                problem.put("lineNumber", marker.getAttribute(IMarker.LINE_NUMBER, -1));
-                problem.put("charStart", marker.getAttribute(IMarker.CHAR_START, -1));
-                problem.put("charEnd", marker.getAttribute(IMarker.CHAR_END, -1));
-
-                int severity = marker.getAttribute(IMarker.SEVERITY, IMarker.SEVERITY_INFO);
-                if (severity == IMarker.SEVERITY_ERROR) {
-                    problem.put("severity", "ERROR");
-                    errors.add(problem);
-                } else if (severity == IMarker.SEVERITY_WARNING) {
-                    problem.put("severity", "WARNING");
-                    warnings.add(problem);
-                }
-            }
+            // Build path problems come first: they are the reason behind the generic
+            // "The project cannot be built until build path errors are resolved" Java problem,
+            // and a caller that only skims the head of the list needs to see the cause (#115).
+            // JDT keeps them under a marker type of their own, a sibling of the Java problem
+            // marker rather than a subtype, so it takes a second findMarkers call.
+            int buildPathProblemCount = collectMarkers(project, IJavaModelMarker.BUILDPATH_PROBLEM_MARKER,
+                    "BUILDPATH", errors, warnings);
+            collectMarkers(project, IJavaModelMarker.JAVA_MODEL_PROBLEM_MARKER, "JAVA", errors, warnings);
 
             Map<String, Object> result = new HashMap<>();
             result.put("projectName", projectName);
             result.put("errorCount", errors.size());
             result.put("warningCount", warnings.size());
+            result.put("buildPathProblemCount", buildPathProblemCount);
             result.put("errors", errors);
             result.put("warnings", warnings);
 
@@ -356,6 +348,44 @@ public class ProjectInfoTools {
         } catch (Exception e) {
             return ToolErrors.errorResult("get compilation errors", e);
         }
+    }
+
+    /**
+     * Adds every error/warning marker of the given type below {@code project} to
+     * {@code errors} / {@code warnings}, tagged with {@code kind}, and returns how many were
+     * added. Markers of severity INFO are ignored, as before.
+     */
+    private static int collectMarkers(IProject project, String markerType, String kind,
+            List<Map<String, Object>> errors, List<Map<String, Object>> warnings) throws CoreException {
+        int collected = 0;
+        for (IMarker marker : project.findMarkers(markerType, true, IResource.DEPTH_INFINITE)) {
+            int severity = marker.getAttribute(IMarker.SEVERITY, IMarker.SEVERITY_INFO);
+            if (severity != IMarker.SEVERITY_ERROR && severity != IMarker.SEVERITY_WARNING) {
+                continue;
+            }
+
+            Map<String, Object> problem = new HashMap<>();
+            problem.put("kind", kind);
+            problem.put("message", marker.getAttribute(IMarker.MESSAGE, ""));
+            // Build path markers sit on the project itself, which has no line information
+            IResource resource = marker.getResource();
+            problem.put("file", resource.getLocation() != null
+                    ? resource.getLocation().toString()
+                    : resource.getFullPath().toString());
+            problem.put("lineNumber", marker.getAttribute(IMarker.LINE_NUMBER, -1));
+            problem.put("charStart", marker.getAttribute(IMarker.CHAR_START, -1));
+            problem.put("charEnd", marker.getAttribute(IMarker.CHAR_END, -1));
+
+            if (severity == IMarker.SEVERITY_ERROR) {
+                problem.put("severity", "ERROR");
+                errors.add(problem);
+            } else {
+                problem.put("severity", "WARNING");
+                warnings.add(problem);
+            }
+            collected++;
+        }
+        return collected;
     }
 
     /**

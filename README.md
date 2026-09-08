@@ -25,7 +25,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 |------|-------------|
 | `jdt_list_projects` | **START HERE**: Alle Java-Projekte im Workspace auflisten |
 | `jdt_get_classpath` | Classpath eines Projekts abrufen (Source-Folder, Libraries, Output-Folder) |
-| `jdt_get_compilation_errors` | Kompilierungsfehler und Warnungen mit Datei, Zeile und Nachricht |
+| `jdt_get_compilation_errors` | Kompilierungsfehler, Warnungen und Build-Path-Probleme mit Datei, Zeile und Nachricht |
 | `jdt_get_project_structure` | Projektstruktur-Übersicht (Java-Version, Source-Folder, Packages) |
 | `jdt_refresh_project` | **WICHTIG**: Workspace aktualisieren nach externen Dateiänderungen (Write/Edit, git) |
 
@@ -394,6 +394,14 @@ Importieren `tests/fixtures/fixture-parent` und lassen `jdt_implement_interface`
 
 ```bash
 tests/codegen-test.sh [path/to/jdt-mcp-binary]
+```
+
+### Build-Path-Test (End-to-End)
+
+Importiert `tests/fixtures/fixture-badclasspath` (fehlende Library im `.classpath`) und prüft, dass `jdt_get_compilation_errors` das konkrete Build-Path-Problem meldet statt nur den Sammelmarker:
+
+```bash
+tests/buildpath-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ### Compiler-Compliance-Test (End-to-End)

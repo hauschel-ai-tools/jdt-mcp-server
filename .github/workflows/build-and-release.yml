@@ -73,6 +73,10 @@ jobs:
         run: tests/hook-test.sh
         timeout-minutes: 5
 
+      - name: Run build path tests
+        run: tests/buildpath-test.sh
+        timeout-minutes: 15
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
