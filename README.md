@@ -1,8 +1,9 @@
 # Eclipse JDT MCP Server
 
-[![GitHub Mirror](https://img.shields.io/badge/mirror-GitHub-blue)](https://github.com/hauschel-ai-tools/jdt-mcp-server)
+[![Release](https://img.shields.io/github/v/release/hauschel-ai-tools/jdt-mcp-server)](https://github.com/hauschel-ai-tools/jdt-mcp-server/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-> **Note:** The GitHub repository is a read-only mirror. Please open issues and pull requests on [Forgejo](https://git.changinggraph.org/ai-tools/jdt-mcp-server).
+> **Note:** This repository moved to GitHub in September 2026. The former home on Forgejo (`git.changinggraph.org/ai-tools/jdt-mcp-server`) is archived; issue numbers were preserved.
 
 An MCP server (Model Context Protocol) that exposes Eclipse JDT features to AI coding assistants like Claude Code, Cursor, and others. It provides **52 tools** across 9 categories — covering navigation, refactoring, code generation, test execution, and more. Runs as a **standalone CLI** (stdio) without requiring the Eclipse IDE. Install with a single `curl | bash` command, then use it from any Java project.
 
@@ -126,7 +127,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 ## Installation (Linux & macOS)
 
 ```bash
-curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.sh | bash
 ```
 
 Das Script erkennt OS und Architektur, lädt die neueste Version herunter, installiert nach `~/.local/share/jdtls-mcp/` und konfiguriert Claude Code automatisch.
@@ -143,7 +144,7 @@ claude
 Einfach den gleichen Befehl erneut ausführen:
 
 ```bash
-curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/install.sh | bash
+curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.sh | bash
 ```
 
 Das Script erkennt die bestehende Installation und zeigt den Update-Pfad an (z.B. `Update: 0.2.1 -> 0.2.2`).
@@ -157,7 +158,7 @@ jdtls-mcp --version
 ### Installation aus lokalem Build
 
 ```bash
-git clone https://git.changinggraph.org/ai-tools/jdt-mcp-server.git
+git clone https://github.com/hauschel-ai-tools/jdt-mcp-server.git
 cd jdt-mcp-server
 ./install-local.sh
 ```
@@ -165,7 +166,7 @@ cd jdt-mcp-server
 ### Deinstallation
 
 ```bash
-curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/branch/main/uninstall.sh | bash
+curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/uninstall.sh | bash
 ```
 
 Oder manuell:
@@ -179,7 +180,7 @@ claude mcp remove jdt-mcp
 
 ```bash
 # Archiv herunterladen von:
-# https://git.changinggraph.org/ai-tools/jdt-mcp-server/releases
+# https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
 # Entpacken
 mkdir -p ~/.local/share/jdtls-mcp
@@ -193,7 +194,7 @@ claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
 
 ```powershell
 # ZIP-Archiv herunterladen von:
-# https://git.changinggraph.org/ai-tools/jdt-mcp-server/releases
+# https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
 # Entpacken (z.B. nach %LOCALAPPDATA%\jdtls-mcp)
 Expand-Archive jdtls-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdtls-mcp"
@@ -208,7 +209,6 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 |-------------------|-------------|----------|
 | `JDTMCP_TRANSPORT` | Transport: `stdio` oder `http` | `stdio` |
 | `JDTMCP_WORKSPACE` | Eclipse Workspace-Verzeichnis | `~/.jdt-mcp/workspaces/<hash>` |
-| `JDTMCP_SOURCE` | Download-Quelle für install.sh: `forgejo` oder `github` | auto-detect |
 | `JAVA_HOME` | Java-Installation | System-Java |
 
 ```bash
@@ -320,10 +320,10 @@ pkill -CONT -f jdtmcp.headless; pkill -TERM -f jdtmcp.headless
 
 | Einschränkung | Betroffenes Tool | Ursache | Issue |
 |---|---|---|---|
-| Projekte mit JUnit Platform 1.x (JUnit 5) schlagen bei `jdt_run_tests`/`jdt_start_tests_async` fehl | `jdt_run_tests`, `jdt_start_tests_async` | `NoClassDefFoundError: org/junit/platform/engine/OutputDirectoryCreator` im gebündelten JUnit5-Runner — dessen Eclipse-JDT-Loader-Version erwartet eine neuere JUnit-Platform-API als 1.x liefert. JUnit Platform 1.x wird daher nicht unterstützt; auf JUnit 6 heben. JUnit 4 und JUnit 6 werden automatisch am Projekt-Classpath erkannt und funktionieren. Workaround für JUnit 5: `jdt_maven_build(goals="test")` | [#71](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/71) |
-| Unbenutzte package-private Felder werden nicht erkannt | `jdt_find_unused_code` | JDT erkennt nur unbenutzte private Members, nicht package-private | [#72](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/72) |
-| `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus | [#81](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/81) |
-| `jdt_implement_interface`: implements-Klausel wird per String eingefügt statt ASTRewrite | `jdt_implement_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen | [#101](https://git.changinggraph.org/ai-tools/jdt-mcp-server/issues/101) |
+| Projekte mit JUnit Platform 1.x (JUnit 5) schlagen bei `jdt_run_tests`/`jdt_start_tests_async` fehl | `jdt_run_tests`, `jdt_start_tests_async` | `NoClassDefFoundError: org/junit/platform/engine/OutputDirectoryCreator` im gebündelten JUnit5-Runner — dessen Eclipse-JDT-Loader-Version erwartet eine neuere JUnit-Platform-API als 1.x liefert. JUnit Platform 1.x wird daher nicht unterstützt; auf JUnit 6 heben. JUnit 4 und JUnit 6 werden automatisch am Projekt-Classpath erkannt und funktionieren. Workaround für JUnit 5: `jdt_maven_build(goals="test")` | [#71](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/71) |
+| Unbenutzte package-private Felder werden nicht erkannt | `jdt_find_unused_code` | JDT erkennt nur unbenutzte private Members, nicht package-private | [#72](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/72) |
+| `jdt_inline` kann bestimmte statische Factory-Methoden nicht inlinen | `jdt_inline` | JDT-Bug: `InlineMethodRefactoring.create()` liefert `null` für manche Method-Patterns im Headless-Modus | [#81](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/81) |
+| `jdt_implement_interface`: implements-Klausel wird per String eingefügt statt ASTRewrite | `jdt_implement_interface` | Kann bei komplexen Klassen-Deklarationen (verschachtelte Generics, mehrere Annotations) fehlschlagen | [#101](https://github.com/hauschel-ai-tools/jdt-mcp-server/issues/101) |
 
 ## Entwicklung
 
@@ -355,12 +355,12 @@ tests/refactoring-test.sh [path/to/jdtls-mcp-binary]
 
 ## Lizenz
 
-[EUPL-1.2](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12) - European Union Public Licence
+[Apache License 2.0](LICENSE)
 
 ## Mitwirken
 
 Beiträge sind willkommen! Bitte erstelle einen Issue oder Pull Request:
-https://git.changinggraph.org/ai-tools/jdt-mcp-server
+https://github.com/hauschel-ai-tools/jdt-mcp-server
 
 ## Built by
 

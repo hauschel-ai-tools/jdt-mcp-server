@@ -12,7 +12,15 @@
 
     <name>Eclipse JDT MCP Server - Parent</name>
     <description>Eclipse Plugin that embeds an MCP Server to expose JDT features to AI coding assistants</description>
-    <url>https://git.changinggraph.org/ai-tools/jdt-mcp-server</url>
+    <url>https://github.com/hauschel-ai-tools/jdt-mcp-server</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <modules>
         <module>org.naturzukunft.jdt.mcp</module>

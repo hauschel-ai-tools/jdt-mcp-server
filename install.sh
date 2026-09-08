@@ -5,22 +5,20 @@
 # Installiert den JDT MCP Server und konfiguriert Claude Code automatisch.
 #
 # Usage:
-#   curl -sSL https://git.changinggraph.org/ai-tools/jdt-mcp-server/raw/tag/<VERSION>/install.sh | bash
+#   curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.sh | bash
 #
 #   Optionen via Umgebungsvariablen:
 #     JDTMCP_VERSION=1.0.0            Version (default: latest)
 #     JDTMCP_INSTALL_DIR=~/my/dir     Installationsverzeichnis
 #     JDTMCP_SKIP_CLAUDE=1            Claude Code Config nicht ändern
-#     JDTMCP_SOURCE=forgejo|github    Download-Quelle (default: auto-detect)
 #
 
 set -euo pipefail
 
 # --- Konfiguration ---
-FORGEJO_URL="https://git.changinggraph.org"
-GITHUB_URL="https://github.com"
-FORGEJO_REPO="ai-tools/jdt-mcp-server"
-GITHUB_REPO="hauschel-ai-tools/jdt-mcp-server"
+REPO="hauschel-ai-tools/jdt-mcp-server"
+BASE_URL="https://github.com"
+API_PREFIX="https://api.github.com/repos"
 INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdtls-mcp}"
 BIN_DIR="$HOME/.local/bin"
 SKIP_CLAUDE="${JDTMCP_SKIP_CLAUDE:-0}"
@@ -39,45 +37,6 @@ fi
 info()  { echo -e "${GREEN}>>>${NC} $*"; }
 warn()  { echo -e "${YELLOW}>>>${NC} $*"; }
 error() { echo -e "${RED}>>>${NC} $*" >&2; exit 1; }
-
-# --- Source bestimmen (forgejo oder github) ---
-# JDTMCP_SOURCE=forgejo|github überschreibt die automatische Erkennung
-resolve_source() {
-    if [ -n "${JDTMCP_SOURCE:-}" ]; then
-        case "$JDTMCP_SOURCE" in
-            github)
-                BASE_URL="$GITHUB_URL"
-                REPO="$GITHUB_REPO"
-                API_PREFIX="https://api.github.com/repos"
-                info "Source: GitHub (manuell gesetzt)"
-                return
-                ;;
-            forgejo)
-                BASE_URL="$FORGEJO_URL"
-                REPO="$FORGEJO_REPO"
-                API_PREFIX="$FORGEJO_URL/api/v1/repos"
-                info "Source: Forgejo (manuell gesetzt)"
-                return
-                ;;
-            *) error "JDTMCP_SOURCE muss 'forgejo' oder 'github' sein, nicht '$JDTMCP_SOURCE'" ;;
-        esac
-    fi
-
-    # Automatische Erkennung: Forgejo bevorzugt, GitHub als Fallback
-    if curl -sSf --connect-timeout 5 "$FORGEJO_URL/api/v1/repos/$FORGEJO_REPO" &>/dev/null; then
-        BASE_URL="$FORGEJO_URL"
-        REPO="$FORGEJO_REPO"
-        API_PREFIX="$FORGEJO_URL/api/v1/repos"
-        info "Source: Forgejo"
-    elif curl -sSf --connect-timeout 5 "https://api.github.com/repos/$GITHUB_REPO" &>/dev/null; then
-        BASE_URL="$GITHUB_URL"
-        REPO="$GITHUB_REPO"
-        API_PREFIX="https://api.github.com/repos"
-        warn "Forgejo nicht erreichbar - verwende GitHub Mirror als Fallback"
-    else
-        error "Weder Forgejo ($FORGEJO_URL) noch GitHub erreichbar."
-    fi
-}
 
 # --- OS und Architektur erkennen ---
 detect_platform() {
@@ -119,7 +78,7 @@ check_java() {
     fi
 
     local version
-    version=$("$java_cmd" -version 2>&1 | head -1 | sed 's/.*"\([0-9]*\).*/\1/')
+    version=$("$java_cmd" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)
     if [ "$version" -lt 21 ] 2>/dev/null; then
         error "Java $version gefunden, aber Java 21+ wird benötigt."
     fi
@@ -135,11 +94,11 @@ resolve_version() {
     fi
 
     info "Ermittle neueste Version..."
-    local api_url="${API_PREFIX}/${REPO}/releases?limit=1"
+    local api_url="${API_PREFIX}/${REPO}/releases/latest"
     local response
     response=$(curl -sSf "$api_url" 2>/dev/null) || error "Konnte Releases nicht abrufen. Ist $BASE_URL erreichbar?"
 
-    VERSION=$(echo "$response" | grep -o '"tag_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+    VERSION=$(echo "$response" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
     if [ -z "$VERSION" ]; then
         error "Kein Release gefunden unter $BASE_URL/$REPO/releases"
     fi
@@ -259,7 +218,6 @@ main() {
 
     detect_platform
     check_java
-    resolve_source
     resolve_version
     install
     configure_claude

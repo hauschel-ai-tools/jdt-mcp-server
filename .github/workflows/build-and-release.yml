@@ -1,0 +1,124 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_OPTS: >-
+        -Djdk.xml.maxGeneralEntitySizeLimit=0
+        -Djdk.xml.entityExpansionLimit=0
+        -Djdk.xml.totalEntitySizeLimit=0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Write version file
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "${GITHUB_REF_NAME#v}" > org.naturzukunft.jdt.mcp.product/.version
+          else
+            echo "dev-${GITHUB_REF_NAME}" > org.naturzukunft.jdt.mcp.product/.version
+          fi
+          echo "Version: $(cat org.naturzukunft.jdt.mcp.product/.version)"
+
+      - name: Build and package
+        run: mvn -B --no-transfer-progress clean package
+
+      - name: Run smoke tests
+        run: tests/smoke-test.sh
+        timeout-minutes: 5
+
+      - name: Run lifecycle tests
+        run: tests/lifecycle-test.sh
+        timeout-minutes: 10
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdtls-mcp-${{ github.ref_name }}
+          path: |
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.tar.gz
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.zip
+          retention-days: 14
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+
+          # Changelog: commits since the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..${TAG}" --no-merges)
+          else
+            CHANGELOG="- Erster Release"
+          fi
+
+          NOTES=$(mktemp)
+          {
+            echo '## Unterstützte Plattformen'
+            echo
+            echo '| Plattform | Architektur | Install-Script | Manuell |'
+            echo '|---|---|---|---|'
+            echo '| Linux | x86_64, aarch64 | ✅ | tar.gz |'
+            echo '| macOS | x86_64, aarch64 (Apple Silicon) | ✅ | tar.gz |'
+            echo '| Windows | x86_64 | - | zip + jdtls-mcp.cmd |'
+            echo
+            echo "## Changes since ${PREV_TAG:-Anfang}"
+            echo
+            echo "$CHANGELOG"
+            echo
+            echo '## Installation / Update (Linux & macOS)'
+            echo
+            echo '```bash'
+            echo "curl -sSL ${REPO_URL}/raw/${TAG}/install.sh | bash"
+            echo '```'
+            echo
+            echo 'Das Script erkennt OS/Architektur automatisch und führt bei bestehender Installation ein Update durch. Danach: `cd /dein/java-projekt && claude`'
+            echo
+            echo '## Installation (Windows)'
+            echo
+            echo '1. ZIP-Archiv herunterladen und entpacken (z.B. nach `%LOCALAPPDATA%\jdtls-mcp`)'
+            echo '2. `claude mcp add -s user jdt-mcp %LOCALAPPDATA%\jdtls-mcp\bin\jdtls-mcp.cmd`'
+            echo
+            echo '## Deinstallation'
+            echo
+            echo "\`curl -sSL ${REPO_URL}/raw/${TAG}/uninstall.sh | bash\`"
+            echo
+            echo '## Dokumentation'
+            echo
+            echo "${REPO_URL}/tree/${TAG}"
+          } > "$NOTES"
+
+          gh release create "$TAG" \
+            --title "JDT MCP Server ${TAG}" \
+            --notes-file "$NOTES" \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.aarch64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.aarch64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip

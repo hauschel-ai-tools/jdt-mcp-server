@@ -335,11 +335,9 @@ Spring Tools MCP verwendet standardmäßig Port 50627. Dieses Plugin verwendet 5
 
 ## Lizenz
 
-[EUPL-1.2](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12) - European Union Public Licence
-
-Siehe [LICENSE](LICENSE) für den vollständigen Lizenztext.
+[Apache License 2.0](../LICENSE)
 
 ## Mitwirken
 
-Beiträge sind willkommen! Bitte erstelle einen Issue oder Pull Request auf Codeberg:
-https://codeberg.org/naturzukunft/jdt-mcp-server
+Beiträge sind willkommen! Bitte erstelle einen Issue oder Pull Request:
+https://github.com/hauschel-ai-tools/jdt-mcp-server
