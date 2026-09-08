@@ -296,6 +296,21 @@ Projekte die nicht im Arbeitsverzeichnis liegen, können nachträglich importier
 jdt_import_project(path="/pfad/zum/anderen/projekt")
 ```
 
+### Git-Worktrees und zweite Checkouts
+
+Ein Eclipse-Projekt ist über seinen Namen identifiziert, und der Name kommt aus dem Modulverzeichnis. Ein zweiter Checkout desselben Repositories — typisch ein git-Worktree neben dem Haupt-Checkout — bringt deshalb Namen mit, die der Workspace schon kennt. Der Server verwendet einen vorhandenen Namen nur wieder, wenn das Projekt bereits in genau diesem Verzeichnis liegt. Sonst bekommt das neue Projekt den Verzeichnisnamen des importierten Pfads als Suffix:
+
+```
+jdt_import_project(path="/home/dev/arknet-worktrees/126")
+→ arknet-core@126, arknet-app@126, …   (Haupt-Checkout bleibt arknet-core, arknet-app, …)
+```
+
+- `jdt_list_projects` zeigt je Projekt `location` (das gebaute Verzeichnis) und `importRoot` (den Checkout, mit dem es importiert wurde) — vor einem Build prüfen, ob der Treffer im eigenen Baum liegt
+- Geschwistermodule werden innerhalb des eigenen Checkouts aufgelöst: `arknet-app@126` referenziert `arknet-core@126`, nicht `arknet-core`
+- `jdt_maven_build` und `jdt_run_tests` melden das Verzeichnis (`location`), in dem sie gelaufen sind
+- Ein unbekannter `projectName` wird mit der Liste der bekannten Projekte samt Pfaden beantwortet, statt still gegen einen anderen Baum zu bauen
+- Der Server importiert beim Start nur sein Arbeitsverzeichnis; ein Worktree muss einmal per `jdt_import_project` dazukommen
+
 ### Workspace-Umgebungsvariablen
 
 | Variable | Beschreibung | Standard |
@@ -322,7 +337,7 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 
 ### Parameter-Formate
 
-- **projectName**: Eclipse-Projektname (von `jdt_list_projects`)
+- **projectName**: Eclipse-Projektname (von `jdt_list_projects`; bei einem zweiten Checkout mit Suffix, z. B. `core@126` — `location` prüfen)
 - **className** (fully qualified): `com.example.MyClass`
 - **methodName/fieldName**: `com.example.MyClass#methodName`
 - **filePath**: Absoluter Pfad zur Java-Datei
@@ -404,6 +419,14 @@ Die Reaktor-Geschwister müssen dafür als Jar auflösbar sein, das Skript insta
 
 ```bash
 tests/buildpath-test.sh [path/to/jdt-mcp-binary]
+```
+
+### Worktree-Test (End-to-End)
+
+Startet den Server in einer Kopie von `tests/fixtures/fixture-parent` und importiert eine zweite Kopie als Worktree (`fixture-parent-worktrees/126`). Prüft, dass die Worktree-Module als `fixture-api@126` usw. mit Pfad im Worktree erscheinen, dass `jdt_list_projects` beide Checkouts über `location`/`importRoot` unterscheidet, dass Geschwister innerhalb des eigenen Checkouts referenziert werden, dass `jdt_maven_build` sein Verzeichnis nennt, dass ein im Worktree eingebauter Compile-Fehler nur dort gemeldet wird und dass ein unbekannter `projectName` die bekannten Projekte mit Pfaden zurückgibt:
+
+```bash
+tests/worktree-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ### Compiler-Compliance-Test (End-to-End)

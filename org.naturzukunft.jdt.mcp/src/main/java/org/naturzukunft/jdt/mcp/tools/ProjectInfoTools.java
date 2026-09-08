@@ -83,7 +83,10 @@ public class ProjectInfoTools {
                 "🚀 START HERE - ALWAYS CALL THIS FIRST! " +
                 "Lists all Java projects in the Eclipse workspace. " +
                 "RETURNS: Project names (you NEED these for ALL other jdt_* tools), locations, Java versions. " +
-                "WORKFLOW: 1) Call this → 2) Pick a project name → 3) Use it in other tools like jdt_find_type, jdt_get_compilation_errors, etc.",
+                "WORKFLOW: 1) Call this → 2) Pick a project name → 3) Use it in other tools like jdt_find_type, jdt_get_compilation_errors, etc. " +
+                "CHECK THE LOCATION: 'location' is the directory a project is built from and 'importRoot' the checkout it was imported with. " +
+                "Working in a git worktree or a second checkout? Its modules are separate projects named '<name>@<directory name>' " +
+                "(import the worktree with jdt_import_project first); a project whose location is another checkout builds THAT checkout.",
                 schema,
                 null);
 
@@ -100,6 +103,10 @@ public class ProjectInfoTools {
                     Map<String, Object> projectInfo = new HashMap<>();
                     projectInfo.put("name", project.getName());
                     projectInfo.put("location", project.getLocation().toString());
+                    java.nio.file.Path importRoot = ProjectImporter.importRootOf(project);
+                    if (importRoot != null) {
+                        projectInfo.put("importRoot", importRoot.toString());
+                    }
                     projectInfo.put("open", project.isOpen());
 
                     // Java version
@@ -245,7 +252,7 @@ public class ProjectInfoTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -323,7 +330,7 @@ public class ProjectInfoTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             List<Map<String, Object>> errors = new ArrayList<>();
@@ -419,7 +426,7 @@ public class ProjectInfoTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -491,7 +498,7 @@ public class ProjectInfoTools {
                 // Refresh specific project
                 IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
                 if (project == null || !project.exists()) {
-                    return new CallToolResult("Project not found: " + projectName, true);
+                    return ToolErrors.projectNotFound(projectName);
                 }
                 project.refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
                 result.put("refreshed", projectName);
@@ -548,7 +555,7 @@ public class ProjectInfoTools {
         try {
             IJavaProject javaProject = getJavaProject(projectName);
             if (javaProject == null) {
-                return new CallToolResult("Java project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             IProject project = javaProject.getProject();
@@ -660,7 +667,10 @@ public class ProjectInfoTools {
                 "Supports Maven projects (pom.xml), Gradle projects (build.gradle/build.gradle.kts), " +
                 "Eclipse projects (.project), and plain Java projects. " +
                 "For Maven multi-module projects, all modules are imported. " +
-                "Use this when jdt_list_projects shows 0 projects or to add additional projects.",
+                "Use this when jdt_list_projects shows 0 projects or to add additional projects. " +
+                "A second checkout of an already imported project (a git worktree) is imported as its own set of projects: " +
+                "a name taken by another directory gets the suffix '@<directory name of path>' (e.g. 'core@126'), " +
+                "the existing project is never silently reused for a different directory.",
                 schema,
                 null);
 
@@ -737,7 +747,7 @@ public class ProjectInfoTools {
         try {
             IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
             if (project == null || !project.exists()) {
-                return new CallToolResult("Project not found: " + projectName, true);
+                return ToolErrors.projectNotFound(projectName);
             }
 
             String location = project.getLocation().toString();

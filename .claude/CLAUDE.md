@@ -47,6 +47,7 @@ am Server weder prüfen noch ausführen. Verifikation stattdessen:
 - `tests/codegen-test.sh` bei Änderungen an `CodeGenerationTools` (E2E für `jdt_implement_interface`: Record/`sealed`/Kommentar-Header sowie Ablehnung von Annotationstyp und Interface als Ziel, Assertions auf Disk plus `javac`)
 - `tests/reopen-test.sh` bei Änderungen am Projekt-Import oder am Start-Build (importiert `fixture-parent`, startet den Server mehrfach auf demselben Workspace und prüft, dass ein wiedergeöffnetes Projekt keine falsch-positiven Fehler meldet)
 - `tests/buildpath-test.sh` bei Änderungen an Classpath-Aufbau, `jdt_maven_update_project` oder Marker-Auswertung (installiert die Fixture-Geschwister vorher per `mvn install` ins lokale Repository)
+- `tests/worktree-test.sh` bei Änderungen an der Projektbenennung beim Import, an der Geschwister-Auflösung oder an der „Project not found“-Antwort (importiert `fixture-parent` zweimal, einmal als Worktree-Kopie, und prüft Namen, Pfade, Projektreferenzen und Fehlerzuordnung je Checkout)
 - `tests/compliance-test.sh` bei Änderungen am Projekt-Import (Compiler-Compliance aus dem POM, Fixture `fixture-java25`; einmal zusätzlich mit `JAVA_HOME` auf JDK 21)
 - `tests/hook-test.sh` bei Änderungen an `hooks/` oder `install.sh` (läuft ohne Produkt-Build, mit temporärem HOME)
 - Produkt-Build (`package`) einmal am Ende eines Arbeitspakets, nicht nach jedem Edit

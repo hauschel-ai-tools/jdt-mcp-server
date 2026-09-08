@@ -80,10 +80,61 @@ public class ProjectImporter {
     public record ImportResult(List<IProject> projects, int reopened, int reconfigured) {
     }
 
-    /** Mutable per-run tally, handed down the import call chain (never shared between runs). */
-    private static final class ImportStats {
+    /**
+     * One import run: the directory it started from plus a mutable tally, handed down the
+     * import call chain (never shared between runs). The root is what disambiguates a project
+     * name that another checkout already holds, see {@link WorkspaceProjectName}.
+     */
+    private static final class ImportRun {
+        private final Path root;
         private int reopened;
         private int reconfigured;
+
+        private ImportRun(Path root) {
+            this.root = root;
+        }
+    }
+
+    /**
+     * The directory an import run started from, stored on every project it produced. Read back
+     * to prefer the sibling from the same checkout when two checkouts of one reactor are open
+     * (a main checkout and a git worktree, #126) and reported by {@code jdt_list_projects}.
+     */
+    private static final QualifiedName IMPORT_ROOT =
+            new QualifiedName("org.naturzukunft.jdt.mcp", "importRoot");
+
+    /**
+     * Returns the directory the given project was imported from, or {@code null} for a project
+     * that carries no such record (imported by an older version, or not by this importer).
+     */
+    public static Path importRootOf(IProject project) {
+        try {
+            String root = project.getPersistentProperty(IMPORT_ROOT);
+            return root == null ? null : Path.of(root);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Picks the workspace name for a project imported from {@code moduleDir}: the wanted name,
+     * unless a project of that name already lives in a different directory (#126).
+     */
+    private static String resolveProjectName(String wantedName, Path moduleDir, ImportRun run) {
+        IWorkspace workspace = ResourcesPlugin.getWorkspace();
+        WorkspaceProjectName.Resolution resolution = WorkspaceProjectName.resolve(
+                wantedName, moduleDir, run.root, name -> {
+                    IProject existing = workspace.getRoot().getProject(name);
+                    return existing.exists() && existing.getLocation() != null
+                            ? Path.of(existing.getLocation().toOSString())
+                            : null;
+                });
+        if (resolution.renamed()) {
+            McpLogger.info("ProjectImporter", "Project name '" + wantedName + "' is taken by "
+                    + resolution.takenBy() + " -- importing " + moduleDir + " as '"
+                    + resolution.name() + "'");
+        }
+        return resolution.name();
     }
 
     /**
@@ -94,12 +145,12 @@ public class ProjectImporter {
      * @return list of imported projects
      */
     public static ImportResult importFromDirectory(Path directory, IProgressMonitor monitor) {
-        ImportStats stats = new ImportStats();
+        ImportRun run = new ImportRun(directory.toAbsolutePath().normalize());
         List<IProject> imported = new ArrayList<>();
 
         if (!Files.isDirectory(directory)) {
             McpLogger.error("ProjectImporter", "Not a directory: " + directory);
-            return new ImportResult(imported, stats.reopened, stats.reconfigured);
+            return new ImportResult(imported, run.reopened, run.reconfigured);
         }
 
         // Track this directory as an import root for reload
@@ -110,22 +161,26 @@ public class ProjectImporter {
 
         if (Files.exists(pomFile)) {
             // Maven project (check BEFORE .project — Maven projects often have .project too)
-            imported.addAll(importMavenProject(directory, monitor, stats));
+            imported.addAll(importMavenProject(directory, monitor, run));
         } else if (isGradleProject(directory)) {
             // Gradle project
-            IProject project = importGradleProject(directory, monitor, stats);
+            IProject project = importGradleProject(directory, monitor, run);
             if (project != null) {
                 imported.add(project);
             }
         } else if (Files.exists(projectFile)) {
             // Eclipse project without Maven/Gradle
-            IProject project = importExistingProject(directory, monitor, stats);
+            IProject project = importExistingProject(directory, monitor, run);
             if (project != null) {
                 imported.add(project);
             }
         } else {
             // No project markers in root — scan subdirectories for projects
-            imported.addAll(scanSubdirectories(directory, monitor, stats));
+            imported.addAll(scanSubdirectories(directory, monitor, run));
+        }
+
+        for (IProject project : imported) {
+            rememberImportRoot(project, run.root);
         }
 
         // Wire up inter-project dependencies so JDT can resolve cross-module references
@@ -133,13 +188,22 @@ public class ProjectImporter {
             setupInterProjectDependencies(imported, monitor);
         }
 
-        return new ImportResult(imported, stats.reopened, stats.reconfigured);
+        return new ImportResult(imported, run.reopened, run.reconfigured);
+    }
+
+    private static void rememberImportRoot(IProject project, Path root) {
+        try {
+            project.setPersistentProperty(IMPORT_ROOT, root.toString());
+        } catch (Exception e) {
+            McpLogger.warn("ProjectImporter",
+                    "Could not store import root for " + project.getName() + ": " + e.getMessage());
+        }
     }
 
     /**
      * Imports an existing Eclipse project (has .project file).
      */
-    private static IProject importExistingProject(Path projectDir, IProgressMonitor monitor, ImportStats stats) {
+    private static IProject importExistingProject(Path projectDir, IProgressMonitor monitor, ImportRun run) {
         try {
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
             org.eclipse.core.runtime.IPath descriptionPath =
@@ -148,10 +212,11 @@ public class ProjectImporter {
 
             // Set the location to the external directory
             description.setLocation(new org.eclipse.core.runtime.Path(projectDir.toString()));
+            description.setName(resolveProjectName(description.getName(), projectDir, run));
 
             IProject project = workspace.getRoot().getProject(description.getName());
             if (project.exists()) {
-                reopenExistingProject(project, monitor, stats);
+                reopenExistingProject(project, monitor, run);
                 McpLogger.info("ProjectImporter", "Opened existing project: " + description.getName());
             } else {
                 project.create(description, monitor);
@@ -169,7 +234,7 @@ public class ProjectImporter {
     /**
      * Imports a Maven project. Handles multi-module projects by reading pom.xml for modules.
      */
-    private static List<IProject> importMavenProject(Path projectDir, IProgressMonitor monitor, ImportStats stats) {
+    private static List<IProject> importMavenProject(Path projectDir, IProgressMonitor monitor, ImportRun run) {
         List<IProject> imported = new ArrayList<>();
 
         // Check for multi-module
@@ -191,16 +256,16 @@ public class ProjectImporter {
                     // Check if module itself is multi-module (recursive)
                     List<String> subModules = readMavenModules(modulePom);
                     if (!subModules.isEmpty()) {
-                        imported.addAll(importMavenProject(moduleDir, monitor, stats));
+                        imported.addAll(importMavenProject(moduleDir, monitor, run));
                     } else {
-                        IProject project = createMavenModuleProject(moduleDir, module, monitor, stats);
+                        IProject project = createMavenModuleProject(moduleDir, module, monitor, run);
                         if (project != null) {
                             imported.add(project);
                         }
                     }
                 } else if (Files.exists(moduleDir.resolve(".project"))) {
                     // Fallback: Eclipse project without pom.xml
-                    IProject project = importExistingProject(moduleDir, monitor, stats);
+                    IProject project = importExistingProject(moduleDir, monitor, run);
                     if (project != null) {
                         imported.add(project);
                     }
@@ -208,7 +273,7 @@ public class ProjectImporter {
                     // Module dir exists but has neither pom.xml nor .project
                     McpLogger.warn("ProjectImporter",
                             "Module '" + module + "' has no pom.xml or .project, importing as basic project");
-                    IProject project = importBasicJavaProject(moduleDir, monitor, stats);
+                    IProject project = importBasicJavaProject(moduleDir, monitor, run);
                     if (project != null) {
                         imported.add(project);
                     }
@@ -217,14 +282,14 @@ public class ProjectImporter {
 
             // Also import the parent if it has source directories
             if (hasSourceDirectories(projectDir)) {
-                IProject parent = createMavenModuleProject(projectDir, projectDir.getFileName().toString(), monitor, stats);
+                IProject parent = createMavenModuleProject(projectDir, projectDir.getFileName().toString(), monitor, run);
                 if (parent != null) {
                     imported.add(parent);
                 }
             }
         } else {
             // Single-module Maven project
-            IProject project = createMavenModuleProject(projectDir, projectDir.getFileName().toString(), monitor, stats);
+            IProject project = createMavenModuleProject(projectDir, projectDir.getFileName().toString(), monitor, run);
             if (project != null) {
                 imported.add(project);
             }
@@ -236,8 +301,9 @@ public class ProjectImporter {
     /**
      * Creates a Java project for a Maven module with standard layout.
      */
-    private static IProject createMavenModuleProject(Path moduleDir, String projectName, IProgressMonitor monitor,
-            ImportStats stats) {
+    private static IProject createMavenModuleProject(Path moduleDir, String wantedName, IProgressMonitor monitor,
+            ImportRun run) {
+        String projectName = resolveProjectName(wantedName, moduleDir, run);
         try {
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
             IProjectDescription description = workspace.newProjectDescription(projectName);
@@ -252,7 +318,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                reopenExistingProject(project, monitor, stats);
+                reopenExistingProject(project, monitor, run);
 
                 // The .classpath left behind by the previous import is a snapshot of the POM at
                 // that time. If the POM chain has changed since, keeping it means building against
@@ -273,7 +339,7 @@ public class ProjectImporter {
                 McpLogger.info("ProjectImporter", "Opened existing project: " + projectName
                         + " — re-resolving classpath (" + staleReason.get() + ")");
                 configureMavenProject(project, moduleDir, projectName, monitor);
-                stats.reconfigured++;
+                run.reconfigured++;
                 return project;
             }
 
@@ -298,10 +364,10 @@ public class ProjectImporter {
      * server answers from the last session's state -- reporting problems that have long been fixed
      * and missing the ones that were introduced (#114).
      */
-    private static void reopenExistingProject(IProject project, IProgressMonitor monitor, ImportStats stats)
+    private static void reopenExistingProject(IProject project, IProgressMonitor monitor, ImportRun run)
             throws Exception {
         project.open(monitor);
-        stats.reopened++;
+        run.reopened++;
         try {
             project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
         } catch (Exception e) {
@@ -414,9 +480,9 @@ public class ProjectImporter {
     /**
      * Imports a directory as a basic Java project (no pom.xml, no .project).
      */
-    private static IProject importBasicJavaProject(Path projectDir, IProgressMonitor monitor, ImportStats stats) {
+    private static IProject importBasicJavaProject(Path projectDir, IProgressMonitor monitor, ImportRun run) {
         try {
-            String projectName = projectDir.getFileName().toString();
+            String projectName = resolveProjectName(projectDir.getFileName().toString(), projectDir, run);
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
             IProjectDescription description = workspace.newProjectDescription(projectName);
             description.setLocation(new org.eclipse.core.runtime.Path(projectDir.toString()));
@@ -429,7 +495,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                reopenExistingProject(project, monitor, stats);
+                reopenExistingProject(project, monitor, run);
                 return project;
             }
 
@@ -562,7 +628,6 @@ public class ProjectImporter {
      */
     public static void setupInterProjectDependencies(List<IProject> projects, IProgressMonitor monitor) {
         WorkspaceMavenModules modules = mapMavenModules(projects);
-        Map<String, IProject> artifactToProject = modules.projectsByArtifactId();
 
         if (modules.size() < 2) {
             return; // Nothing to wire up
@@ -644,7 +709,7 @@ public class ProjectImporter {
                 if (Files.exists(pomFile)) {
                     List<String> depArtifactIds = readMavenDependencyArtifactIds(pomFile);
                     for (String depArtifactId : depArtifactIds) {
-                        IProject depProject = artifactToProject.get(depArtifactId);
+                        IProject depProject = modules.resolve(depArtifactId, project);
                         if (depProject != null && !depProject.equals(project)
                                 && placedProjectRefs.add(depProject.getName())) {
                             newClasspath.add(JavaCore.newProjectEntry(depProject.getFullPath()));
@@ -680,14 +745,52 @@ public class ProjectImporter {
     }
 
     /**
-     * The Maven modules open in the workspace, indexed by artifactId: the project itself and
-     * its groupId (which is {@code null} when the POM chain did not yield one).
+     * The Maven modules open in the workspace, indexed by artifactId: every project that builds
+     * the artifact (more than one when a second checkout of the reactor is open, #126) and its
+     * groupId (which is {@code null} when the POM chain did not yield one).
      */
-    public record WorkspaceMavenModules(Map<String, IProject> projectsByArtifactId,
+    public record WorkspaceMavenModules(Map<String, List<IProject>> projectsByArtifactId,
             Map<String, String> groupIdsByArtifactId) {
 
         public int size() {
             return projectsByArtifactId.size();
+        }
+
+        /**
+         * Returns the workspace project that builds {@code artifactId} as seen from
+         * {@code from}, or {@code null} when no open project does. With two checkouts of the
+         * same reactor open, the sibling from the checkout {@code from} was imported from wins;
+         * a project from a foreign checkout falls back to the checkout the server was started
+         * in, then to the first match. A worktree module must never compile against the main
+         * checkout's copy of its sibling and vice versa.
+         */
+        public IProject resolve(String artifactId, IProject from) {
+            List<IProject> candidates = projectsByArtifactId.get(artifactId);
+            if (candidates == null || candidates.isEmpty()) {
+                return null;
+            }
+            if (candidates.size() == 1) {
+                return candidates.get(0);
+            }
+            IProject sameCheckout = firstWithRoot(candidates, importRootOf(from));
+            if (sameCheckout != null) {
+                return sameCheckout;
+            }
+            IProject startupCheckout = firstWithRoot(candidates,
+                    Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize());
+            return startupCheckout != null ? startupCheckout : candidates.get(0);
+        }
+
+        private static IProject firstWithRoot(List<IProject> candidates, Path root) {
+            if (root == null) {
+                return null;
+            }
+            for (IProject candidate : candidates) {
+                if (root.equals(importRootOf(candidate))) {
+                    return candidate;
+                }
+            }
+            return null;
         }
     }
 
@@ -696,7 +799,7 @@ public class ProjectImporter {
      * readable {@code pom.xml} are skipped.
      */
     public static WorkspaceMavenModules mapMavenModules(Collection<IProject> projects) {
-        Map<String, IProject> projectsByArtifactId = new HashMap<>();
+        Map<String, List<IProject>> projectsByArtifactId = new HashMap<>();
         Map<String, String> groupIdsByArtifactId = new HashMap<>();
         for (IProject project : projects) {
             if (project.getLocation() == null) {
@@ -706,8 +809,8 @@ public class ProjectImporter {
             if (Files.exists(pomFile)) {
                 String artifactId = readMavenArtifactId(pomFile);
                 if (artifactId != null) {
-                    projectsByArtifactId.put(artifactId, project);
-                    groupIdsByArtifactId.put(artifactId, readMavenGroupId(pomFile));
+                    projectsByArtifactId.computeIfAbsent(artifactId, k -> new ArrayList<>()).add(project);
+                    groupIdsByArtifactId.putIfAbsent(artifactId, readMavenGroupId(pomFile));
                 }
             }
         }
@@ -731,7 +834,7 @@ public class ProjectImporter {
         if (artifactId == null) {
             return null;
         }
-        IProject matched = modules.projectsByArtifactId().get(artifactId);
+        IProject matched = modules.resolve(artifactId, self);
         return matched == null || matched.equals(self) ? null : matched;
     }
 
@@ -884,7 +987,7 @@ public class ProjectImporter {
      * Scans immediate subdirectories for projects (.project, pom.xml, or build.gradle).
      * Falls back to importing the root as a basic Java project if no subprojects found.
      */
-    private static List<IProject> scanSubdirectories(Path directory, IProgressMonitor monitor, ImportStats stats) {
+    private static List<IProject> scanSubdirectories(Path directory, IProgressMonitor monitor, ImportRun run) {
         List<IProject> imported = new ArrayList<>();
 
         try (var entries = Files.newDirectoryStream(directory, Files::isDirectory)) {
@@ -895,14 +998,14 @@ public class ProjectImporter {
                 }
 
                 if (Files.exists(subDir.resolve("pom.xml"))) {
-                    imported.addAll(importMavenProject(subDir, monitor, stats));
+                    imported.addAll(importMavenProject(subDir, monitor, run));
                 } else if (isGradleProject(subDir)) {
-                    IProject project = importGradleProject(subDir, monitor, stats);
+                    IProject project = importGradleProject(subDir, monitor, run);
                     if (project != null) {
                         imported.add(project);
                     }
                 } else if (Files.exists(subDir.resolve(".project"))) {
-                    IProject project = importExistingProject(subDir, monitor, stats);
+                    IProject project = importExistingProject(subDir, monitor, run);
                     if (project != null) {
                         imported.add(project);
                     }
@@ -914,7 +1017,7 @@ public class ProjectImporter {
 
         if (imported.isEmpty()) {
             // No subprojects found — try importing root as basic Java project
-            IProject project = importBasicJavaProject(directory, monitor, stats);
+            IProject project = importBasicJavaProject(directory, monitor, run);
             if (project != null) {
                 imported.add(project);
             }
@@ -972,9 +1075,9 @@ public class ProjectImporter {
      * Imports a Gradle project. Sets up source directories based on standard Gradle/Maven layout.
      * Resolves dependencies using 'gradle dependencies' if available.
      */
-    private static IProject importGradleProject(Path projectDir, IProgressMonitor monitor, ImportStats stats) {
+    private static IProject importGradleProject(Path projectDir, IProgressMonitor monitor, ImportRun run) {
         try {
-            String projectName = projectDir.getFileName().toString();
+            String projectName = resolveProjectName(projectDir.getFileName().toString(), projectDir, run);
             McpLogger.info("ProjectImporter", "Importing Gradle project: " + projectName);
 
             IWorkspace workspace = ResourcesPlugin.getWorkspace();
@@ -989,7 +1092,7 @@ public class ProjectImporter {
 
             IProject project = workspace.getRoot().getProject(projectName);
             if (project.exists()) {
-                reopenExistingProject(project, monitor, stats);
+                reopenExistingProject(project, monitor, run);
                 McpLogger.info("ProjectImporter", "Opened existing Gradle project: " + projectName);
                 return project;
             }
