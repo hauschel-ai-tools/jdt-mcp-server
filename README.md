@@ -387,6 +387,22 @@ Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-external
 tests/refactoring-test.sh [path/to/jdt-mcp-binary]
 ```
 
+### Compiler-Compliance-Test (End-to-End)
+
+Importiert `tests/fixtures/fixture-java25` (`maven.compiler.release=25`, nutzt Module-Import-Deklarationen) und prüft, dass `jdt_get_project_structure` `compliance=25` meldet und `jdt_get_compilation_errors` sauber ist — unabhängig davon, mit welcher JVM der Server selbst gestartet wurde:
+
+```bash
+tests/compliance-test.sh [path/to/jdt-mcp-binary]
+```
+
+### Unit-Tests
+
+`org.naturzukunft.jdt.mcp` ist ein Tycho-`eclipse-plugin`-Modul ohne Tycho-Surefire-Testfragment. Klassen ohne Eclipse/OSGi-Abhängigkeit (z. B. `MavenCompilerCompliance`) werden stattdessen mit einem eigenständigen JUnit-5-Runner getestet, der gegen bereits lokal gecachte JUnit-Jars kompiliert (Quellen unter `org.naturzukunft.jdt.mcp/unit-tests/java/`, außerhalb des Tycho-Reactors):
+
+```bash
+tests/run-unit-tests.sh
+```
+
 ## Lizenz
 
 [Apache License 2.0](LICENSE)
