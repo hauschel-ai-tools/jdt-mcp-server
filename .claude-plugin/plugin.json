@@ -1,9 +1,11 @@
 {
   "name": "jdt-mcp-server",
-  "description": "Eclipse JDT MCP Server — 44 Tools für Java-Entwicklung: Navigation, Refactoring, Code-Generierung, Tests und mehr.",
+  "version": "2.0.0",
+  "description": "Eclipse JDT MCP Server — 52 Tools für headless Java-Entwicklung mit Claude Code: Projekt-Import, Navigation, Code-Analyse, Refactoring, Code-Generierung, Test-Ausführung und Workspace-Management, direkt auf dem echten Eclipse-JDT-Modell statt auf Textsuche.",
   "author": {
     "name": "SoftwareEngineering Hauschel"
   },
+  "homepage": "https://github.com/hauschel-ai-tools/jdt-mcp-server",
   "repository": "https://github.com/hauschel-ai-tools/jdt-mcp-server",
   "license": "Apache-2.0"
 }

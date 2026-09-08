@@ -139,6 +139,32 @@ cd /dein/java-projekt
 claude
 ```
 
+### Marketplace-Plugin (Claude Code)
+
+Alternative zu `install.sh`: dieses Repo ist selbst ein Claude-Code-Plugin
+(`.claude-plugin/plugin.json` + `.mcp.json`). Über einen Marketplace installiert
+(`/plugin marketplace add ...` bzw. das Marketplace-übliche `/plugin install`) bringt
+das Plugin die MCP-Server-Registrierung selbst mit — es ist kein separates
+`install.sh` nötig, um `jdt-mcp` als Server bekannt zu machen.
+
+Der Server braucht trotzdem den Launcher-Binary. Dafür läuft beim Session-Start ein
+`SessionStart`-Hook (`hooks/ensure-server.sh`): fehlt der Launcher (`~/.local/bin/jdt-mcp`
+bzw. `~/.local/share/jdt-mcp/bin/jdt-mcp`), führt er `install.sh` aus dem Plugin-Verzeichnis
+aus — mit `JDTMCP_SKIP_CLAUDE=1`, installiert also **nur** den Launcher, ohne zusätzlich
+`claude mcp add` aufzurufen (das übernimmt bereits die `.mcp.json` des Plugins). Fehlt Java 21+
+oder Netzzugriff, meldet der Hook das als Kontext-Hinweis in der Session, statt die Session
+zu blockieren (Exit 0 in jedem Fall).
+
+**Schon eine Standalone-Installation per `install.sh` vorhanden** (also `jdt-mcp` bereits via
+`claude mcp add -s user jdt-mcp ...` im User-Scope registriert)? Dann NICHT zusätzlich das
+Marketplace-Plugin aktivieren — beide Registrierungen sind unterschiedlich benannt
+(`mcp__jdt-mcp__*` im User-Scope vs. `mcp__plugin_jdt-mcp-server_jdt-mcp__*` im Plugin-Scope)
+und würden nebeneinander laufen, also zwei separate Server-Prozesse gegen denselben
+Eclipse-Workspace eines Arbeitsverzeichnisses starten. Der Workspace-Mutation-Lock im Server
+ist ein prozessinterner `ReentrantLock` und schützt nicht vor einer zweiten JVM auf demselben
+Workspace. Wer beides ausprobiert hat: entweder das Plugin deaktivieren, oder die
+User-Scope-Registrierung entfernen (`claude mcp remove -s user jdt-mcp`) und beim Plugin bleiben.
+
 ### Update
 
 Einfach den gleichen Befehl erneut ausführen:

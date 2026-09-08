@@ -10,7 +10,11 @@
 #   Optionen via Umgebungsvariablen:
 #     JDTMCP_VERSION=1.0.0            Version (default: latest)
 #     JDTMCP_INSTALL_DIR=~/my/dir     Installationsverzeichnis
-#     JDTMCP_SKIP_CLAUDE=1            Claude Code Config nicht ändern
+#     JDTMCP_SKIP_CLAUDE=1            Claude Code Config (claude mcp add) nicht ändern --
+#                                     nutzt z.B. das Marketplace-Plugin, dessen eigene
+#                                     .mcp.json den Server registriert (siehe hooks/ensure-server.sh)
+#     JDTMCP_DRY_RUN=1                Kein Download, keine echte Installation -- legt nur einen
+#                                     Stub-Launcher an. Für Hook-/CI-Tests ohne Netzzugriff.
 #
 
 set -euo pipefail
@@ -22,6 +26,7 @@ API_PREFIX="https://api.github.com/repos"
 INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdt-mcp}"
 BIN_DIR="$HOME/.local/bin"
 SKIP_CLAUDE="${JDTMCP_SKIP_CLAUDE:-0}"
+DRY_RUN="${JDTMCP_DRY_RUN:-0}"
 
 # Alt-Installation vor der Umbenennung (Issue #107): Launcher hieß bis v1.1.0 "jdtls-mcp"
 LEGACY_INSTALL_DIR="$HOME/.local/share/jdtls-mcp"
@@ -98,6 +103,12 @@ resolve_version() {
         return
     fi
 
+    if [ "$DRY_RUN" = "1" ]; then
+        VERSION="dry-run"
+        info "Version: $VERSION (JDTMCP_DRY_RUN=1, kein API-Call)"
+        return
+    fi
+
     info "Ermittle neueste Version..."
     local api_url="${API_PREFIX}/${REPO}/releases/latest"
     local response
@@ -128,6 +139,23 @@ cleanup_legacy() {
 
 # --- Download & Installation ---
 install() {
+    if [ "$DRY_RUN" = "1" ]; then
+        info "JDTMCP_DRY_RUN=1: kein Download, lege nur einen Stub-Launcher an"
+        rm -rf "$INSTALL_DIR"
+        mkdir -p "$INSTALL_DIR/bin"
+        cat > "$INSTALL_DIR/bin/jdt-mcp" <<'EOF'
+#!/bin/sh
+# Stub-Launcher, erzeugt von install.sh mit JDTMCP_DRY_RUN=1 -- kein echter Server.
+echo "jdt-mcp dry-run stub" >&2
+exit 0
+EOF
+        chmod +x "$INSTALL_DIR/bin/jdt-mcp"
+        mkdir -p "$BIN_DIR"
+        ln -sf "$INSTALL_DIR/bin/jdt-mcp" "$BIN_DIR/jdt-mcp"
+        info "Symlink: $BIN_DIR/jdt-mcp"
+        return
+    fi
+
     local download_url="$BASE_URL/$REPO/releases/download/v${VERSION}/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
 
     info "Download: $download_url"
