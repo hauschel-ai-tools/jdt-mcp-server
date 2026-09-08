@@ -132,7 +132,7 @@ public class HeadlessApplication implements IApplication {
             List<IProject> allProjects = new java.util.ArrayList<>();
             for (Path root : importRoots) {
                 List<IProject> projects = ProjectImporter.importFromDirectory(
-                        root, new NullProgressMonitor());
+                        root, new NullProgressMonitor()).projects();
                 allProjects.addAll(projects);
             }
 
@@ -200,8 +200,9 @@ public class HeadlessApplication implements IApplication {
 
         Thread importThread = new Thread(() -> {
             try {
-                List<IProject> projects = ProjectImporter.importFromDirectory(
+                ProjectImporter.ImportResult imported = ProjectImporter.importFromDirectory(
                         Path.of(workDir), new NullProgressMonitor());
+                List<IProject> projects = imported.projects();
 
                 McpLogger.info("HeadlessApplication", "Imported " + projects.size() + " project(s):");
                 for (IProject project : projects) {
@@ -214,9 +215,13 @@ public class HeadlessApplication implements IApplication {
                 var desc = workspace.getDescription();
                 desc.setAutoBuilding(true);
                 workspace.setDescription(desc);
-                McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering workspace build...");
 
-                workspace.build(IncrementalProjectBuilder.INCREMENTAL_BUILD, new NullProgressMonitor());
+                int buildKind = startupBuildKind(imported);
+                McpLogger.info("HeadlessApplication", "Auto-building enabled, triggering "
+                        + (buildKind == IncrementalProjectBuilder.FULL_BUILD ? "full" : "incremental")
+                        + " workspace build...");
+
+                workspace.build(buildKind, new NullProgressMonitor());
                 McpLogger.info("HeadlessApplication", "Workspace build completed");
 
             } catch (Exception e) {
@@ -259,6 +264,31 @@ public class HeadlessApplication implements IApplication {
 
         McpLogger.info("HeadlessApplication", "Shutting down");
         return IApplication.EXIT_OK;
+    }
+
+    /**
+     * Chooses the build kind for the build that follows the startup import.
+     *
+     * <p>A reopened project brings the saved build state and the persisted problem markers of an
+     * earlier session with it. An incremental build over that state does nothing when Eclipse sees
+     * no resource delta, so markers that describe a problem which no longer exists survive the
+     * restart -- the second half of #114. Whatever changed while no session was running (a JAR that
+     * appeared in the local repository, a re-resolved classpath) is invisible to that delta, so as
+     * soon as a single project was reopened, the workspace is built in full and every marker is
+     * produced by this session.
+     *
+     * <p>The decision is taken from this import run's own result, not from a shared counter:
+     * {@code jdt_import_project} and {@code jdt_reload_workspace} are exempt from the readiness
+     * gate and can run while the startup import is still going.
+     */
+    private static int startupBuildKind(ProjectImporter.ImportResult imported) {
+        if (imported.reopened() > 0) {
+            McpLogger.info("HeadlessApplication", imported.reopened() + " project(s) reopened from an earlier "
+                    + "session (" + imported.reconfigured() + " needed a fresh classpath) — building the workspace "
+                    + "in full so no build state or marker of that session survives");
+            return IncrementalProjectBuilder.FULL_BUILD;
+        }
+        return IncrementalProjectBuilder.INCREMENTAL_BUILD;
     }
 
     /**
