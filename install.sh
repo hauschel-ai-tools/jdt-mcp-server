@@ -19,9 +19,14 @@ set -euo pipefail
 REPO="hauschel-ai-tools/jdt-mcp-server"
 BASE_URL="https://github.com"
 API_PREFIX="https://api.github.com/repos"
-INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdtls-mcp}"
+INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdt-mcp}"
 BIN_DIR="$HOME/.local/bin"
 SKIP_CLAUDE="${JDTMCP_SKIP_CLAUDE:-0}"
+
+# Alt-Installation vor der Umbenennung (Issue #107): Launcher hieß bis v1.1.0 "jdtls-mcp"
+LEGACY_INSTALL_DIR="$HOME/.local/share/jdtls-mcp"
+LEGACY_BIN_LINK="$BIN_DIR/jdtls-mcp"
+LEGACY_CLEANED=0
 
 # --- Farben (nur wenn Terminal) ---
 if [ -t 1 ]; then
@@ -56,7 +61,7 @@ detect_platform() {
         *)             error "Nicht unterstützte Architektur: $arch" ;;
     esac
 
-    ARCHIVE_NAME="jdtls-mcp-${PLATFORM}.${ARCH}"
+    ARCHIVE_NAME="jdt-mcp-${PLATFORM}.${ARCH}"
 
     case "$os" in
         Linux)  ARCHIVE_EXT="tar.gz" ;;
@@ -107,6 +112,20 @@ resolve_version() {
     info "Version: $VERSION (latest)"
 }
 
+# --- Alt-Installation (jdtls-mcp) bereinigen ---
+cleanup_legacy() {
+    if [ -e "$LEGACY_INSTALL_DIR" ] && [ "$LEGACY_INSTALL_DIR" != "$INSTALL_DIR" ]; then
+        warn "Alt-Installation gefunden: $LEGACY_INSTALL_DIR (Launcher hieß vor der Umbenennung 'jdtls-mcp') - wird entfernt"
+        rm -rf "$LEGACY_INSTALL_DIR"
+        LEGACY_CLEANED=1
+    fi
+    if [ -L "$LEGACY_BIN_LINK" ] || [ -e "$LEGACY_BIN_LINK" ]; then
+        warn "Alter Symlink gefunden: $LEGACY_BIN_LINK - wird entfernt"
+        rm -f "$LEGACY_BIN_LINK"
+        LEGACY_CLEANED=1
+    fi
+}
+
 # --- Download & Installation ---
 install() {
     local download_url="$BASE_URL/$REPO/releases/download/v${VERSION}/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
@@ -122,8 +141,8 @@ install() {
     # Vorherige Installation prüfen
     if [ -d "$INSTALL_DIR" ]; then
         local old_version="unbekannt"
-        if [ -x "$INSTALL_DIR/bin/jdtls-mcp" ]; then
-            old_version=$("$INSTALL_DIR/bin/jdtls-mcp" --version 2>/dev/null | sed 's/JDT MCP Server //' || echo "unbekannt")
+        if [ -x "$INSTALL_DIR/bin/jdt-mcp" ]; then
+            old_version=$("$INSTALL_DIR/bin/jdt-mcp" --version 2>/dev/null | sed 's/JDT MCP Server //' || echo "unbekannt")
         fi
         if [ "$old_version" = "$VERSION" ]; then
             info "Version $VERSION ist bereits installiert - wird neu installiert"
@@ -142,12 +161,12 @@ install() {
     esac
 
     # Launcher ausführbar machen
-    chmod +x "$INSTALL_DIR/bin/jdtls-mcp"
+    chmod +x "$INSTALL_DIR/bin/jdt-mcp"
 
     # Symlink in ~/.local/bin
     mkdir -p "$BIN_DIR"
-    ln -sf "$INSTALL_DIR/bin/jdtls-mcp" "$BIN_DIR/jdtls-mcp"
-    info "Symlink: $BIN_DIR/jdtls-mcp"
+    ln -sf "$INSTALL_DIR/bin/jdt-mcp" "$BIN_DIR/jdt-mcp"
+    info "Symlink: $BIN_DIR/jdt-mcp"
 }
 
 # --- Claude Code konfigurieren ---
@@ -158,7 +177,7 @@ configure_claude() {
     fi
 
     local claude_settings="$HOME/.claude.json"
-    local launcher="$INSTALL_DIR/bin/jdtls-mcp"
+    local launcher="$INSTALL_DIR/bin/jdt-mcp"
 
     # Prüfen ob Claude Code installiert ist
     if ! command -v claude &>/dev/null && [ ! -f "$claude_settings" ]; then
@@ -188,8 +207,13 @@ print_summary() {
     echo -e "${BOLD}Installation abgeschlossen!${NC}"
     echo ""
     echo "  Installation:  $INSTALL_DIR"
-    echo "  Befehl:        jdtls-mcp"
+    echo "  Befehl:        jdt-mcp"
     echo ""
+
+    if [ "$LEGACY_CLEANED" = "1" ]; then
+        echo -e "${YELLOW}Hinweis:${NC} Alt-Installation von vor der Umbenennung ('jdtls-mcp', ~180 MB) wurde entfernt."
+        echo ""
+    fi
 
     # Prüfen ob ~/.local/bin im PATH ist
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -205,7 +229,7 @@ print_summary() {
     echo "    claude"
     echo ""
     echo "  Deinstallation:"
-    echo "    rm -rf $INSTALL_DIR $BIN_DIR/jdtls-mcp"
+    echo "    rm -rf $INSTALL_DIR $BIN_DIR/jdt-mcp"
     echo "    claude mcp remove jdt-mcp"
     echo ""
 }
@@ -219,6 +243,7 @@ main() {
     detect_platform
     check_java
     resolve_version
+    cleanup_legacy
     install
     configure_claude
     print_summary

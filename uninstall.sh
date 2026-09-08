@@ -11,8 +11,12 @@
 
 set -euo pipefail
 
-INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdtls-mcp}"
-BIN_LINK="$HOME/.local/bin/jdtls-mcp"
+INSTALL_DIR="${JDTMCP_INSTALL_DIR:-$HOME/.local/share/jdt-mcp}"
+BIN_LINK="$HOME/.local/bin/jdt-mcp"
+
+# Alt-Installation vor der Umbenennung (Issue #107): Launcher hieß bis v1.1.0 "jdtls-mcp"
+LEGACY_INSTALL_DIR="$HOME/.local/share/jdtls-mcp"
+LEGACY_BIN_LINK="$HOME/.local/bin/jdtls-mcp"
 
 # --- Farben (nur wenn Terminal) ---
 if [ -t 1 ]; then
@@ -32,8 +36,8 @@ echo -e "${BOLD}JDT MCP Server - Uninstaller${NC}"
 echo ""
 
 # Version anzeigen falls vorhanden
-if [ -x "$INSTALL_DIR/bin/jdtls-mcp" ]; then
-    version=$("$INSTALL_DIR/bin/jdtls-mcp" --version 2>/dev/null || echo "unbekannt")
+if [ -x "$INSTALL_DIR/bin/jdt-mcp" ]; then
+    version=$("$INSTALL_DIR/bin/jdt-mcp" --version 2>/dev/null || echo "unbekannt")
     info "Gefunden: $version"
 fi
 
@@ -54,6 +58,16 @@ fi
 if [ -L "$BIN_LINK" ] || [ -f "$BIN_LINK" ]; then
     rm -f "$BIN_LINK"
     info "Symlink entfernt: $BIN_LINK"
+fi
+
+# Alt-Installation von vor der Umbenennung (Issue #107) mit entfernen, falls noch vorhanden
+if [ -e "$LEGACY_INSTALL_DIR" ] && [ "$LEGACY_INSTALL_DIR" != "$INSTALL_DIR" ]; then
+    rm -rf "$LEGACY_INSTALL_DIR"
+    info "Alt-Installation entfernt: $LEGACY_INSTALL_DIR (Launcher hieß vor der Umbenennung 'jdtls-mcp')"
+fi
+if [ -L "$LEGACY_BIN_LINK" ] || [ -f "$LEGACY_BIN_LINK" ]; then
+    rm -f "$LEGACY_BIN_LINK"
+    info "Alter Symlink entfernt: $LEGACY_BIN_LINK"
 fi
 
 echo ""

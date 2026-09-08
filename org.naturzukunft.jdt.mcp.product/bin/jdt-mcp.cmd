@@ -4,8 +4,8 @@ REM JDT MCP Server - Standalone launcher (Windows)
 REM Starts the Eclipse JDT MCP server for use with AI coding assistants.
 REM
 REM Usage:
-REM   jdtls-mcp              # stdio mode (default, for Claude Code)
-REM   jdtls-mcp --http       # HTTP/SSE mode (for debugging)
+REM   jdt-mcp          # stdio mode (default, for Claude Code)
+REM   jdt-mcp --http   # HTTP/SSE mode (for debugging)
 REM
 REM Environment variables:
 REM   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: %USERPROFILE%\.jdt-mcp\workspaces\<hash-of-cwd>)

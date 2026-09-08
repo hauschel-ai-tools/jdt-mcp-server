@@ -4,8 +4,8 @@
 # Starts the Eclipse JDT MCP server for use with AI coding assistants.
 #
 # Usage:
-#   jdtls-mcp              # stdio mode (default, for Claude Code)
-#   jdtls-mcp --http       # HTTP/SSE mode (for debugging)
+#   jdt-mcp          # stdio mode (default, for Claude Code)
+#   jdt-mcp --http   # HTTP/SSE mode (for debugging)
 #
 # Environment variables:
 #   JDTMCP_WORKSPACE  - Eclipse workspace directory (default: ~/.jdt-mcp/workspaces/<hash-of-cwd>)

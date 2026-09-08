@@ -862,7 +862,7 @@ public class ProjectImporter {
                         McpLogger.warn("ProjectImporter",
                                 "Lombok dependency detected in '" + projectName + "' but Lombok agent is NOT loaded. " +
                                 "This will cause phantom compile errors (unresolved getters, constructors, loggers). " +
-                                "To fix: restart jdtls-mcp (auto-detection should add -javaagent), " +
+                                "To fix: restart jdt-mcp (auto-detection should add -javaagent), " +
                                 "or add '-javaagent:<path>/lombok.jar' to ~/.jdt-mcp/jdt-mcp.ini");
                     }
                     return;

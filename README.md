@@ -122,7 +122,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 |---|---|---|---|
 | Linux | x86_64, aarch64 | `curl ... \| bash` | tar.gz |
 | macOS | x86_64, aarch64 (Apple Silicon) | `curl ... \| bash` | tar.gz |
-| Windows | x86_64 | - | zip + `jdtls-mcp.cmd` |
+| Windows | x86_64 | - | zip + `jdt-mcp.cmd` |
 
 ## Installation (Linux & macOS)
 
@@ -130,7 +130,7 @@ Der Server stellt **52 MCP-Tools** in 9 Kategorien bereit:
 curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.sh | bash
 ```
 
-Das Script erkennt OS und Architektur, lädt die neueste Version herunter, installiert nach `~/.local/share/jdtls-mcp/` und konfiguriert Claude Code automatisch.
+Das Script erkennt OS und Architektur, lädt die neueste Version herunter, installiert nach `~/.local/share/jdt-mcp/` und konfiguriert Claude Code automatisch.
 
 Danach:
 
@@ -149,10 +149,12 @@ curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/install.s
 
 Das Script erkennt die bestehende Installation und zeigt den Update-Pfad an (z.B. `Update: 0.2.1 -> 0.2.2`).
 
+Der Launcher hieß bis v1.1.0 `jdtls-mcp`. Beim Update von einer älteren Version entfernt `install.sh` automatisch die Alt-Installation unter `~/.local/share/jdtls-mcp` (~180 MB) sowie den alten Symlink `~/.local/bin/jdtls-mcp`. Wer den Pfad manuell in `claude mcp add` eingetragen hatte (statt über dieses Script), muss die Registrierung selbst auf `jdt-mcp` (siehe unten) umstellen.
+
 Installierte Version prüfen:
 
 ```bash
-jdtls-mcp --version
+jdt-mcp --version
 ```
 
 ### Installation aus lokalem Build
@@ -172,7 +174,7 @@ curl -sSL https://github.com/hauschel-ai-tools/jdt-mcp-server/raw/main/uninstall
 Oder manuell:
 
 ```bash
-rm -rf ~/.local/share/jdtls-mcp ~/.local/bin/jdtls-mcp
+rm -rf ~/.local/share/jdt-mcp ~/.local/bin/jdt-mcp
 claude mcp remove jdt-mcp
 ```
 
@@ -183,11 +185,11 @@ claude mcp remove jdt-mcp
 # https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
 # Entpacken
-mkdir -p ~/.local/share/jdtls-mcp
-tar xzf jdtls-mcp-linux.gtk.x86_64.tar.gz -C ~/.local/share/jdtls-mcp
+mkdir -p ~/.local/share/jdt-mcp
+tar xzf jdt-mcp-linux.gtk.x86_64.tar.gz -C ~/.local/share/jdt-mcp
 
 # Claude Code konfigurieren
-claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
+claude mcp add -s user jdt-mcp ~/.local/share/jdt-mcp/bin/jdt-mcp
 ```
 
 ### Manuelle Installation (Windows)
@@ -196,11 +198,11 @@ claude mcp add -s user jdt-mcp ~/.local/share/jdtls-mcp/bin/jdtls-mcp
 # ZIP-Archiv herunterladen von:
 # https://github.com/hauschel-ai-tools/jdt-mcp-server/releases
 
-# Entpacken (z.B. nach %LOCALAPPDATA%\jdtls-mcp)
-Expand-Archive jdtls-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdtls-mcp"
+# Entpacken (z.B. nach %LOCALAPPDATA%\jdt-mcp)
+Expand-Archive jdt-mcp-win32.win32.x86_64.zip -DestinationPath "$env:LOCALAPPDATA\jdt-mcp"
 
 # Claude Code konfigurieren
-claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
+claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdt-mcp\bin\jdt-mcp.cmd"
 ```
 
 ### Erweiterte Optionen
@@ -213,7 +215,7 @@ claude mcp add -s user jdt-mcp "$env:LOCALAPPDATA\jdtls-mcp\bin\jdtls-mcp.cmd"
 
 ```bash
 # HTTP-Modus (für Debugging)
-jdtls-mcp --http
+jdt-mcp --http
 ```
 
 ## Workspace-Management
@@ -298,7 +300,7 @@ tail -f ~/.jdt-mcp/jdt-mcp-mein-java-projekt.log
 
 1. Log prüfen: `~/.jdt-mcp/jdt-mcp-<projektname>.log`
 2. Java-Version prüfen: `java -version` (21+ erforderlich)
-3. Binary testen: `jdtls-mcp` direkt ausführen, stderr-Ausgabe beobachten
+3. Binary testen: `jdt-mcp` direkt ausführen, stderr-Ausgabe beobachten
 
 ### Veraltete Daten nach Dateiänderungen
 
@@ -332,7 +334,7 @@ pkill -CONT -f jdtmcp.headless; pkill -TERM -f jdtmcp.headless
 Der Server hat stdio-basierte Smoke Tests, die den MCP-Protokoll-Handshake und grundlegende Tool-Aufrufe prüfen:
 
 ```bash
-tests/smoke-test.sh [path/to/jdtls-mcp-binary]
+tests/smoke-test.sh [path/to/jdt-mcp-binary]
 ```
 
 Ohne Argument wird das Binary aus dem lokalen Build verwendet.
@@ -342,7 +344,7 @@ Ohne Argument wird das Binary aus dem lokalen Build verwendet.
 Prüfen, dass die Server-JVM ihren Client nie überlebt (stdin-EOF, Signal-Weiterleitung, Parent-Death-Erkennung, eigene Prozessgruppe):
 
 ```bash
-tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
+tests/lifecycle-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ### Refactoring-Tests (End-to-End)
@@ -350,7 +352,7 @@ tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
 Importieren `tests/fixtures/fixture-parent` und `tests/fixtures/fixture-external` als zwei getrennte Projekte und prüfen nach jedem Refactoring den Zustand **auf der Festplatte**, nicht die Tool-Antwort — im Headless-Modus meldete ein Refactoring schon Erfolg, während die Änderungen nur im Puffer standen:
 
 ```bash
-tests/refactoring-test.sh [path/to/jdtls-mcp-binary]
+tests/refactoring-test.sh [path/to/jdt-mcp-binary]
 ```
 
 ## Lizenz

@@ -3,7 +3,7 @@
 # Tests that inter-project dependencies are set up correctly for cross-module
 # refactoring (issue #15).
 #
-# Usage:  tests/multi-module-test.sh [path/to/jdtls-mcp-binary]
+# Usage:  tests/multi-module-test.sh [path/to/jdt-mcp-binary]
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ find_binary() {
         return
     fi
 
-    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp/linux/gtk/x86_64/bin/jdtls-mcp"
+    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp/linux/gtk/x86_64/bin/jdt-mcp"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return

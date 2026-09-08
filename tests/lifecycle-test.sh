@@ -8,7 +8,7 @@
 #   4. SIGKILL to wrapper   -> JVM notices parent death and exits on its own
 #   5. JVM runs in its own process group (group-wide stop signals miss it)
 #
-# Usage:  tests/lifecycle-test.sh [path/to/jdtls-mcp-binary]
+# Usage:  tests/lifecycle-test.sh [path/to/jdt-mcp-binary]
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ find_binary() {
         echo "$explicit"
         return
     fi
-    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp/linux/gtk/x86_64/bin/jdtls-mcp"
+    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp/linux/gtk/x86_64/bin/jdt-mcp"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return

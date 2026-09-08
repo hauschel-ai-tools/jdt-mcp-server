@@ -18,7 +18,7 @@
 #
 # Requires: bash, jq, mkfifo
 #
-# Usage:  tests/refactoring-test.sh [path/to/jdtls-mcp-binary]
+# Usage:  tests/refactoring-test.sh [path/to/jdt-mcp-binary]
 #         If no binary is given, the script searches the build output.
 
 set -euo pipefail
@@ -55,7 +55,7 @@ find_binary() {
         return
     fi
 
-    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp/linux/gtk/x86_64/bin/jdtls-mcp"
+    local candidate="$PROJECT_ROOT/org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp/linux/gtk/x86_64/bin/jdt-mcp"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return

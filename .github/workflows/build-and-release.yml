@@ -56,10 +56,10 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: jdtls-mcp-build-${{ github.run_number }}
+          name: jdt-mcp-build-${{ github.run_number }}
           path: |
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.tar.gz
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-*.zip
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-*.tar.gz
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-*.zip
           retention-days: 14
 
       - name: Create GitHub release
@@ -86,7 +86,7 @@ jobs:
             echo '|---|---|---|---|'
             echo '| Linux | x86_64, aarch64 | ✅ | tar.gz |'
             echo '| macOS | x86_64, aarch64 (Apple Silicon) | ✅ | tar.gz |'
-            echo '| Windows | x86_64 | - | zip + jdtls-mcp.cmd |'
+            echo '| Windows | x86_64 | - | zip + jdt-mcp.cmd |'
             echo
             echo "## Changes since ${PREV_TAG:-Anfang}"
             echo
@@ -102,8 +102,8 @@ jobs:
             echo
             echo '## Installation (Windows)'
             echo
-            echo '1. ZIP-Archiv herunterladen und entpacken (z.B. nach `%LOCALAPPDATA%\jdtls-mcp`)'
-            echo '2. `claude mcp add -s user jdt-mcp %LOCALAPPDATA%\jdtls-mcp\bin\jdtls-mcp.cmd`'
+            echo '1. ZIP-Archiv herunterladen und entpacken (z.B. nach `%LOCALAPPDATA%\jdt-mcp`)'
+            echo '2. `claude mcp add -s user jdt-mcp %LOCALAPPDATA%\jdt-mcp\bin\jdt-mcp.cmd`'
             echo
             echo '## Deinstallation'
             echo
@@ -117,8 +117,8 @@ jobs:
           gh release create "$TAG" \
             --title "JDT MCP Server ${TAG}" \
             --notes-file "$NOTES" \
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.x86_64.tar.gz \
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-linux.gtk.aarch64.tar.gz \
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.x86_64.tar.gz \
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-macosx.cocoa.aarch64.tar.gz \
-            org.naturzukunft.jdt.mcp.product/target/products/jdtls-mcp-win32.win32.x86_64.zip
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-linux.gtk.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-linux.gtk.aarch64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-macosx.cocoa.x86_64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-macosx.cocoa.aarch64.tar.gz \
+            org.naturzukunft.jdt.mcp.product/target/products/jdt-mcp-win32.win32.x86_64.zip
