@@ -49,6 +49,7 @@ tests/fixtures/
 | `ProcessorFactory` | core | findCallers, inline, introduceParameter |
 | `DataHolder` | core | generate*, encapsulateField |
 | `HelperUtil` | core | moveType target |
+| `org.fixture.codegen.*` | core | Declaration headers for implementInterface: record with components, sealed class with `permits`, comment containing `{`, nested generics in an existing implements list (driven by `tests/codegen-test.sh`) |
 | `AppService` | app | Cross-module caller (same parent), generateJavadoc |
 | `Main` | app | runMain |
 | `BrokenClass` | broken | getCompilationErrors |
@@ -275,7 +276,7 @@ Call: jdt_find_annotated_elements(annotationName="Tracked")
 Assert: finds BaseProcessor, BatchProcessor, AppService, ExternalService (4 classes, across projects)
 
 Call: jdt_find_annotated_elements(annotationName="Auditable", projectName="fixture-core")
-Assert: finds SimpleProcessor, DataHolder
+Assert: finds SimpleProcessor, DataHolder, AnnotatedTarget (org.fixture.codegen)
 ```
 
 ---

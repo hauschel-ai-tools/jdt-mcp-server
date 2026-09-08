@@ -20,9 +20,13 @@ import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
+import org.eclipse.jdt.core.dom.ChildListPropertyDescriptor;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.EnumDeclaration;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.NodeFinder;
+import org.eclipse.jdt.core.dom.RecordDeclaration;
+import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
 import org.eclipse.text.edits.TextEdit;
@@ -565,6 +569,7 @@ public class CodeGenerationTools {
                 "Make a class implement an interface and generate method stubs. " +
                 "🤖 PREFERRED over Edit tool - automatically adds 'implements' clause and generates all required method stubs. " +
                 "Skips methods that already exist in the class. " +
+                "Works on classes, records and enums, including declarations with an extends, permits or type parameter clause. " +
                 "Use jdt_organize_imports afterwards to add the interface import.",
                 schema,
                 null);
@@ -585,6 +590,21 @@ public class CodeGenerationTools {
             ICompilationUnit cu = type.getCompilationUnit();
             if (cu == null) {
                 return new CallToolResult("Cannot modify type (binary or read-only): " + className, true);
+            }
+
+            // Only a class, record or enum can implement an interface. An annotation type has no
+            // super interface list at all, and for an interface the entry would land in its
+            // extends list while the generated stubs (with bodies) would not compile.
+            if (type.isAnnotation()) {
+                return new CallToolResult(className
+                        + " is an annotation type and cannot implement an interface. "
+                        + "Pass a class, record or enum as 'className'.", true);
+            }
+            if (type.isInterface()) {
+                return new CallToolResult(className
+                        + " is an interface, not a class. Method stubs with a body would not compile there. "
+                        + "To let an interface extend another one, edit its extends clause; "
+                        + "to derive a new interface from a class, use jdt_extract_interface.", true);
             }
 
             IType interfaceType = findTypeByName(interfaceName);
@@ -617,16 +637,8 @@ public class CodeGenerationTools {
                 }
             }
 
-            // Add implements clause
-            String source = cu.getSource();
-            String newSource = addImplementsClause(source, type, simpleInterfaceName);
-
-            if (newSource == null) {
-                return new CallToolResult("Failed to add implements clause", true);
-            }
-
-            cu.getBuffer().setContents(newSource);
-            cu.save(new NullProgressMonitor(), true);
+            // Add the interface to the type's super interface list via AST-based rewriting
+            addSuperInterface(type, cu, simpleInterfaceName);
 
             // Add import for the interface
             cu.createImport(interfaceName, null, new NullProgressMonitor());
@@ -649,85 +661,6 @@ public class CodeGenerationTools {
 
         } catch (Exception e) {
             return ToolErrors.errorResult("implement interface", e);
-        }
-    }
-
-    private static String addImplementsClause(String source, IType type, String interfaceName) {
-        try {
-            ISourceRange nameRange = type.getNameRange();
-            int classNameEnd = nameRange.getOffset() + nameRange.getLength();
-
-            // Find the opening brace of the class
-            int bracePos = source.indexOf('{', classNameEnd);
-            if (bracePos < 0) {
-                return null;
-            }
-
-            // Get the text between class name and opening brace
-            String between = source.substring(classNameEnd, bracePos);
-
-            // Check if there's already an implements clause
-            if (between.contains("implements")) {
-                // Add to existing implements clause
-                int implementsPos = between.indexOf("implements");
-                int insertPos = classNameEnd + implementsPos + "implements".length();
-
-                // Find where to insert (after "implements " and before next keyword or brace)
-                String afterImplements = source.substring(insertPos, bracePos).trim();
-
-                // Insert at the end of the implements list
-                int endOfList = bracePos;
-                // Go backwards to find the actual end of interface list
-                while (endOfList > insertPos && Character.isWhitespace(source.charAt(endOfList - 1))) {
-                    endOfList--;
-                }
-
-                return source.substring(0, endOfList) + ", " + interfaceName + source.substring(endOfList);
-            } else {
-                // Check if there's an extends clause
-                int insertPos;
-                if (between.contains("extends")) {
-                    // Find end of extends clause - look for the class name after extends
-                    int extendsPos = between.indexOf("extends");
-                    int afterExtends = classNameEnd + extendsPos + "extends".length();
-
-                    // Skip whitespace and find the superclass name
-                    int i = afterExtends;
-                    while (i < bracePos && Character.isWhitespace(source.charAt(i))) {
-                        i++;
-                    }
-                    // Find end of superclass name (may include generics)
-                    int genericDepth = 0;
-                    while (i < bracePos) {
-                        char c = source.charAt(i);
-                        if (c == '<') genericDepth++;
-                        else if (c == '>') genericDepth--;
-                        else if (genericDepth == 0 && (Character.isWhitespace(c) || c == '{')) {
-                            break;
-                        }
-                        i++;
-                    }
-                    insertPos = i;
-                } else {
-                    // No extends, insert after class name (and any type parameters)
-                    // Check for type parameters
-                    int i = classNameEnd;
-                    if (i < bracePos && source.charAt(i) == '<') {
-                        int genericDepth = 1;
-                        i++;
-                        while (i < bracePos && genericDepth > 0) {
-                            if (source.charAt(i) == '<') genericDepth++;
-                            else if (source.charAt(i) == '>') genericDepth--;
-                            i++;
-                        }
-                    }
-                    insertPos = i;
-                }
-
-                return source.substring(0, insertPos) + " implements " + interfaceName + source.substring(insertPos);
-            }
-        } catch (Exception e) {
-            return null;
         }
     }
 
@@ -1589,6 +1522,71 @@ public class CodeGenerationTools {
             listRewrite.insertLast(placeholder, null);
         }
 
+        applyRewrite(cu, rewrite);
+    }
+
+    /**
+     * Helper: Add {@code interfaceName} to the super interface list of a type using AST-based
+     * structural rewriting instead of scanning the source text between the type name and the
+     * next {@code '{'} (see issue #101: the text scan mis-parses record component lists, the
+     * {@code permits} clause of a sealed type, and comments containing a brace).
+     *
+     * <p>The list property differs per declaration kind, so classes/interfaces, enums and
+     * records are dispatched separately; an annotation type has no such list at all.
+     */
+    private static void addSuperInterface(IType type, ICompilationUnit cu, String interfaceName)
+            throws Exception {
+        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+        parser.setKind(ASTParser.K_COMPILATION_UNIT);
+        parser.setSource(cu);
+        parser.setResolveBindings(false);
+        CompilationUnit astRoot = (CompilationUnit) parser.createAST(new NullProgressMonitor());
+
+        AbstractTypeDeclaration typeDecl = findTypeDeclaration(astRoot, type);
+        if (typeDecl == null) {
+            throw new IllegalStateException(
+                    "Could not locate AST declaration for type " + type.getFullyQualifiedName());
+        }
+
+        ChildListPropertyDescriptor superInterfaces = superInterfaceProperty(typeDecl);
+        if (superInterfaces == null) {
+            // Unreachable for annotation types (rejected in implementInterface); kept as a guard
+            // for any further AbstractTypeDeclaration subclass a future JDT may introduce.
+            throw new IllegalStateException("Declaration of " + type.getFullyQualifiedName()
+                    + " (" + typeDecl.getClass().getSimpleName() + ") has no super interface list");
+        }
+
+        AST ast = astRoot.getAST();
+        ASTRewrite rewrite = ASTRewrite.create(ast);
+        rewrite.getListRewrite(typeDecl, superInterfaces)
+                .insertLast(ast.newSimpleType(ast.newName(interfaceName)), null);
+
+        applyRewrite(cu, rewrite);
+    }
+
+    /**
+     * Helper: The super interface list property of a type declaration -- {@code implements} for
+     * classes, enums and records, {@code extends} for interfaces -- or {@code null} for any
+     * declaration kind that has no such list (today only an annotation type).
+     */
+    private static ChildListPropertyDescriptor superInterfaceProperty(AbstractTypeDeclaration typeDecl) {
+        if (typeDecl instanceof TypeDeclaration) {
+            return TypeDeclaration.SUPER_INTERFACE_TYPES_PROPERTY;
+        }
+        if (typeDecl instanceof EnumDeclaration) {
+            return EnumDeclaration.SUPER_INTERFACE_TYPES_PROPERTY;
+        }
+        if (typeDecl instanceof RecordDeclaration) {
+            return RecordDeclaration.SUPER_INTERFACE_TYPES_PROPERTY;
+        }
+        return null;
+    }
+
+    /**
+     * Helper: Apply a rewrite to the compilation unit through a working copy -- the write path
+     * shared by every AST-based modification in this class.
+     */
+    private static void applyRewrite(ICompilationUnit cu, ASTRewrite rewrite) throws Exception {
         TextEdit edit = rewrite.rewriteAST();
         ICompilationUnit workingCopy = cu.getWorkingCopy(new NullProgressMonitor());
         try {
